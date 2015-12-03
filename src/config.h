@@ -28,11 +28,6 @@
 #ifndef config_h
 #define config_h
 
-
-// Default settings. Used when resetting EEPROM. Change to desired name in defaults.h
-#define DEFAULTS_TRIBED
-//#define DEFAULTS_GENERIC
-
 // Serial baud rate
 #define BAUD_RATE 115200
 
@@ -49,73 +44,6 @@
 #define N_DECIMAL_RATEVALUE_MM    0 // Rate or velocity value in mm/min
 #define N_DECIMAL_SETTINGVALUE    3 // Decimals for floating point setting values
 
-// If your machine has two limits switches wired in parallel to one axis, you will need to enable
-// this feature. Since the two switches are sharing a single pin, there is no way for Grbl to tell
-// which one is enabled. This option only effects homing, where if a limit is engaged, Grbl will 
-// alarm out and force the user to manually disengage the limit switch. Otherwise, if you have one
-// limit switch for each axis, don't enable this option. By keeping it disabled, you can perform a
-// homing cycle while on the limit switch and not have to move the machine off of it.
-// #define LIMITS_TWO_SWITCHES_ON_AXES
-
-// Allows GRBL to track and report gcode line numbers.  Enabling this means that the planning buffer
-// goes from 18 or 16 to make room for the additional line number data in the plan_block_t struct
-// #define USE_LINE_NUMBERS // Disabled by default. Uncomment to enable.
-
-// Allows GRBL to report the real-time feed rate.  Enabling this means that GRBL will be reporting more 
-// data with each status update.
-// NOTE: This is experimental and doesn't quite work 100%. Maybe fixed or refactored later.
-// #define REPORT_REALTIME_RATE // Disabled by default. Uncomment to enable.
-
-// Upon a successful probe cycle, this option provides immediately feedback of the probe coordinates
-// through an automatically generated message. If disabled, users can still access the last probe
-// coordinates through Grbl '$#' print parameters.
-#define MESSAGE_PROBE_COORDINATES // Enabled by default. Comment to disable.
- 
-// Enables a second coolant control pin via the mist coolant g-code command M7 on the Arduino Uno
-// analog pin 5. Only use this option if you require a second coolant control pin.
-// NOTE: The M8 flood coolant control pin on analog pin 4 will still be functional regardless.
-// #define ENABLE_M7 // Disabled by default. Uncomment to enable.
-
-// This option causes the feed hold input to act as a safety door switch. A safety door, when triggered,
-// immediately forces a feed hold and then safely de-energizes the machine. Resuming is blocked until
-// the safety door is re-engaged. When it is, Grbl will re-energize the machine and then resume on the
-// previous tool path, as if nothing happened.
-// #define ENABLE_SAFETY_DOOR_INPUT_PIN // Default disabled. Uncomment to enable.
-
-// After the safety door switch has been toggled and restored, this setting sets the power-up delay
-// between restoring the spindle and coolant and resuming the cycle.
-// NOTE: Delay value is defined in milliseconds from zero to 65,535. 
-#define SAFETY_DOOR_SPINDLE_DELAY 4000
-#define SAFETY_DOOR_COOLANT_DELAY 1000
-
-// Enable CoreXY kinematics. Use ONLY with CoreXY machines. 
-// IMPORTANT: If homing is enabled, you must reconfigure the homing cycle #defines above to 
-// #define HOMING_CYCLE_0 (1<<X_AXIS) and #define HOMING_CYCLE_1 (1<<Y_AXIS)
-// NOTE: This configuration option alters the motion of the X and Y axes to principle of operation
-// defined at (http://corexy.com/theory.html). Motors are assumed to positioned and wired exactly as
-// described, if not, motions may move in strange directions. Grbl assumes the CoreXY A and B motors
-// have the same steps per mm internally.
-// #define COREXY // Default disabled. Uncomment to enable.
-
-// Inverts pin logic of the control command pins. This essentially means when this option is enabled
-// you can use normally-closed switches, rather than the default normally-open switches.
-// NOTE: If you require individual control pins inverted, keep this macro disabled and simply alter
-//   the CONTROL_INVERT_MASK definition in cpu_map.h files.
-// #define INVERT_ALL_CONTROL_PINS // Default disabled. Uncomment to enable.
-
-// Inverts the spindle enable pin from low-disabled/high-enabled to low-enabled/high-disabled. Useful
-// for some pre-built electronic boards.
-// NOTE: If VARIABLE_SPINDLE is enabled(default), this option has no effect as the PWM output and 
-// spindle enable are combined to one pin. If you need both this option and spindle speed PWM, 
-// uncomment the config option USE_SPINDLE_DIR_AS_ENABLE_PIN below.
-// #define INVERT_SPINDLE_ENABLE_PIN // Default disabled. Uncomment to enable.
-
-// Enable control pin states feedback in status reports. The data is presented as simple binary of
-// the control pin port (0 (low) or 1(high)), masked to show only the input pins. Non-control pins on the 
-// port will always show a 0 value. See cpu_map.h for the pin bitmap. As with the limit pin reporting,
-// we do not recommend keeping this option enabled. Try to only use this for setting up a new CNC.
-// #define REPORT_CONTROL_PIN_STATE // Default disabled. Uncomment to enable.
-
 // ---------------------------------------------------------------------------------------
 // ADVANCED CONFIGURATION OPTIONS:
 
@@ -125,77 +53,6 @@
 // at 16MHz is used.
 // NOTE: For now disabled, will enable if flash space permits.
 // #define MAX_STEP_RATE_HZ 30000 // Hz
-
-
-// Used by the variable spindle output only. These parameters set the maximum and minimum spindle speed
-// "S" g-code values to correspond to the maximum and minimum pin voltages. There are 256 discrete and 
-// equally divided voltage bins between the maximum and minimum spindle speeds. So for a 5V pin, 1000
-// max rpm, and 250 min rpm, the spindle output voltage would be set for the following "S" commands: 
-// "S1000" @ 5V, "S250" @ 0.02V, and "S625" @ 2.5V (mid-range). The pin outputs 0V when disabled.
-#define SPINDLE_MAX_RPM 1000.0 // Max spindle RPM. This value is equal to 100% duty cycle on the PWM.
-#define SPINDLE_MIN_RPM 0.0    // Min spindle RPM. This value is equal to (1/256) duty cycle on the PWM.
-
-// Used by variable spindle output only. This forces the PWM output to a minimum duty cycle when enabled.
-// When disabled, the PWM pin will still read 0V. Most users will not need this option, but it may be 
-// useful in certain scenarios. This setting does not update the minimum spindle RPM calculations. Any
-// spindle RPM output lower than this value will be set to this value.
-// #define MINIMUM_SPINDLE_PWM 5 // Default disabled. Uncomment to enable. Integer (0-255)
-
-// By default on a 328p(Uno), Grbl combines the variable spindle PWM and the enable into one pin to help 
-// preserve I/O pins. For certain setups, these may need to be separate pins. This configure option uses
-// the spindle direction pin(D13) as a separate spindle enable pin along with spindle speed PWM on pin D11. 
-// NOTE: This configure option only works with VARIABLE_SPINDLE enabled and a 328p processor (Uno). 
-// NOTE: With no direction pin, the spindle clockwise M4 g-code command will be removed. M3 and M5 still work.
-// NOTE: BEWARE! The Arduino bootloader toggles the D13 pin when it powers up. If you flash Grbl with
-// a programmer (you can use a spare Arduino as "Arduino as ISP". Search the web on how to wire this.), 
-// this D13 LED toggling should go away. We haven't tested this though. Please report how it goes!
-// #define USE_SPINDLE_DIR_AS_ENABLE_PIN // Default disabled. Uncomment to enable.
-
-// With this enabled, Grbl sends back an echo of the line it has received, which has been pre-parsed (spaces
-// removed, capitalized letters, no comments) and is to be immediately executed by Grbl. Echoes will not be 
-// sent upon a line buffer overflow, but should for all normal lines sent to Grbl. For example, if a user 
-// sendss the line 'g1 x1.032 y2.45 (test comment)', Grbl will echo back in the form '[echo: G1X1.032Y2.45]'.
-// NOTE: Only use this for debugging purposes!! When echoing, this takes up valuable resources and can effect
-// performance. If absolutely needed for normal operation, the serial write buffer should be greatly increased
-// to help minimize transmission waiting within the serial write protocol.
-// #define REPORT_ECHO_LINE_RECEIVED // Default disabled. Uncomment to enable.
-
-// Minimum planner junction speed. Sets the default minimum junction speed the planner plans to at
-// every buffer block junction, except for starting from rest and end of the buffer, which are always
-// zero. This value controls how fast the machine moves through junctions with no regard for acceleration
-// limits or angle between neighboring block line move directions. This is useful for machines that can't
-// tolerate the tool dwelling for a split second, i.e. 3d printers or laser cutters. If used, this value
-// should not be much greater than zero or to the minimum value necessary for the machine to work.
-#define MINIMUM_JUNCTION_SPEED 0.0 // (mm/min)
-
-// Sets the minimum feed rate the planner will allow. Any value below it will be set to this minimum
-// value. This also ensures that a planned motion always completes and accounts for any floating-point
-// round-off errors. Although not recommended, a lower value than 1.0 mm/min will likely work in smaller
-// machines, perhaps to 0.1mm/min, but your success may vary based on multiple factors.
-#define MINIMUM_FEED_RATE 1.0 // (mm/min)
-
-// Number of arc generation iterations by small angle approximation before exact arc trajectory 
-// correction with expensive sin() and cos() calcualtions. This parameter maybe decreased if there 
-// are issues with the accuracy of the arc generations, or increased if arc execution is getting
-// bogged down by too many trig calculations. 
-#define N_ARC_CORRECTION 12 // Integer (1-255)
-
-// The arc G2/3 g-code standard is problematic by definition. Radius-based arcs have horrible numerical 
-// errors when arc at semi-circles(pi) or full-circles(2*pi). Offset-based arcs are much more accurate 
-// but still have a problem when arcs are full-circles (2*pi). This define accounts for the floating 
-// point issues when offset-based arcs are commanded as full circles, but get interpreted as extremely
-// small arcs with around machine epsilon (1.2e-7rad) due to numerical round-off and precision issues.
-// This define value sets the machine epsilon cutoff to determine if the arc is a full-circle or not.
-// NOTE: Be very careful when adjusting this value. It should always be greater than 1.2e-7 but not too
-// much greater than this. The default setting should capture most, if not all, full arc error situations.
-#define ARC_ANGULAR_TRAVEL_EPSILON 5E-7 // Float (radians)
-
-// Time delay increments performed during a dwell. The default value is set at 50ms, which provides
-// a maximum time delay of roughly 55 minutes, more than enough for most any application. Increasing
-// this delay will increase the maximum dwell time linearly, but also reduces the responsiveness of 
-// run-time command executions, like status reports, since these are performed between each dwell 
-// time step. Also, keep in mind that the Arduino delay timer is not very accurate for long delays.
-#define DWELL_TIME_STEP 50 // Integer (1-255) (milliseconds)
 
 // Creates a delay between the direction pin setting and corresponding step pulse by creating
 // another interrupt (Timer2 compare) to manage it. The main Grbl interrupt (Timer1 compare) 
@@ -207,21 +64,6 @@
 // user-supplied step pulse time, the total time must not exceed 127us. Reported successful
 // values for certain setups have ranged from 5 to 20us.
 // #define STEP_PULSE_DELAY 10 // Step pulse delay in microseconds. Default disabled.
-
-// The number of linear motions in the planner buffer to be planned at any give time. The vast
-// majority of RAM that Grbl uses is based on this buffer size. Only increase if there is extra 
-// available RAM, like when re-compiling for a Mega or Sanguino. Or decrease if the Arduino
-// begins to crash due to the lack of available RAM or if the CPU is having trouble keeping
-// up with planning new incoming motions as they are executed. 
-// #define BLOCK_BUFFER_SIZE 18  // Uncomment to override default in planner.h.
-
-// Governs the size of the intermediary step segment buffer between the step execution algorithm
-// and the planner blocks. Each segment is set of steps executed at a constant velocity over a
-// fixed time defined by ACCELERATION_TICKS_PER_SECOND. They are computed such that the planner
-// block velocity profile is traced exactly. The size of this buffer governs how much step 
-// execution lead time there is for other Grbl processes have to compute and do their thing 
-// before having to come back and refill this buffer, currently at ~50msec of step moves.
-// #define SEGMENT_BUFFER_SIZE 6 // Uncomment to override default in stepper.h.
 
 // Line buffer size from the serial input stream to be executed. Also, governs the size of 
 // each of the startup blocks, as they are each stored as a string of this size. Make sure

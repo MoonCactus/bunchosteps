@@ -3,8 +3,12 @@
 # Dumps the last open USB tty serial port while being friendly with
 # others programs that also require the port (e.g. avrdude upload).
 # Just send USR1 to stop and USR2 to resume (pid is in /tmp/auto_serial.pid)
-# Manual mode is possible also with 
+# Warning: it will send the serial data back to the incoming stream (bug to fix!)
 #
+
+# Run this script in its own folder (hardcore bashism)
+DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+cd $DIR
 
 baudRate=${1-115200}
 resumeNow=

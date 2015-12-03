@@ -22,9 +22,6 @@
 #ifndef nuts_bolts_h
 #define nuts_bolts_h
 
-#define false 0
-#define true  1
-
 #define max(a,b) (((a) > (b)) ? (a) : (b))
 #define min(a,b) (((a) < (b)) ? (a) : (b))
 
@@ -35,11 +32,21 @@
 // #define bits_false_atomic(x,mask) {uint8_t sreg = SREG; cli(); (x) &= ~(mask); SREG = sreg; }
 // #define bits_toggle_atomic(x,mask) {uint8_t sreg = SREG; cli(); (x) ^= (mask); SREG = sreg; }
 
-#define bset(x,n)   (x) |=  (1<<(n))
-#define bclr(x,n)   (x) &= ~(1<<(n))
+#define bset(x,n)   x |=  (1<<(n))
+#define bclr(x,n)   x &= ~(1<<(n))
 
 #define bisset(x,n) (((x) & (1<<(n))) != 0)
 #define bisclr(x,n) (((x) & (1<<(n))) == 0)
+
+// Just instanciate this class for temporary interrupt disable
+class StopInt
+{
+private:
+	uint8_t sreg = SREG;
+public:
+	StopInt()		{ cli(); sreg= SREG; }
+	~StopInt()		{ SREG = sreg; }
+};
 
 // Read a floating point value from a string. Line points to the input buffer, char_counter 
 // is the indexer pointing to the current character of the line, while float_ptr is 

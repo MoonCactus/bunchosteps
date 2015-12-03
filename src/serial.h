@@ -22,12 +22,11 @@
 #ifndef serial_h
 #define serial_h
 
-
 #ifndef RX_BUFFER_SIZE
-  #define RX_BUFFER_SIZE 128
+  #define RX_BUFFER_SIZE 256
 #endif
 #ifndef TX_BUFFER_SIZE
-  #define TX_BUFFER_SIZE 64
+  #define TX_BUFFER_SIZE 256
 #endif
 
 #define SERIAL_NO_DATA 0xff
@@ -61,12 +60,16 @@ uint8_t serial_get_rx_buffer_count();
 // NOTE: Not used except for debugging and ensuring no TX bottlenecks.
 uint8_t serial_get_tx_buffer_count();
 
+// ======================== PRINTING ROUTINES
+
+void print_char(const char s);
+
 void print_string(const char *s);
 
 #define print_pstr(s) _print_pstr(PSTR(s))
 void _print_pstr(const char *s);
 
-void printInteger(long n);
+void print_integer(long n);
 
 void print_uint32_base10(uint32_t n);
 
@@ -79,18 +82,10 @@ void print_uint8_base2(uint8_t n);
 // Prints an uint8 variable in base 10.
 void print_uint8_base10(uint8_t n);
 
-void printFloat(float n, uint8_t decimal_places);
-
-// Floating value printing handlers for special variables types used in Grbl.
-//  - CoordValue: Handles all position or coordinate values in inches or mm reporting.
-//  - RateValue: Handles feed rate and current velocity in inches or mm reporting.
-//  - SettingValue: Handles all floating point settings values (always in mm.)
-void printFloat_CoordValue(float n);
-
-void printFloat_RateValue(float n);
-
-void printFloat_SettingValue(float n);
+void print_float(float n, uint8_t decimal_places);
+void print_float(float n);
 
 // Debug tool to print free memory in bytes at the called point. Not used otherwise.
-void printFreeMemory();
+void print_free_memory();
+
 #endif

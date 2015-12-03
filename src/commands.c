@@ -6,6 +6,8 @@
  */
 
 #include "main.h"
+#include "commands.h"
+#include "serial.h"
 
 void command_execute(const char* cmd)
 {
@@ -50,3 +52,4 @@ void command_collect()
 			cmd_buf[cmd_len++]= c;
 	}
 }
+

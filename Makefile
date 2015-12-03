@@ -31,7 +31,7 @@
 DEVICE     ?= atmega328p
 CLOCK      = 16000000
 PROGRAMMER ?= -c avrisp2 -P usb
-SOURCE    = main.c time.c serial.c nuts_bolts.c system.c steppers.c commands.c
+SOURCE    = main.c serial.c utils.c system.c steppers.c commands.c limits.c
 BUILDDIR = build
 SOURCEDIR = src
 # FUSES      = -U hfuse:w:0xd9:m -U lfuse:w:0x24:m
@@ -40,7 +40,7 @@ FUSES      = -U hfuse:w:0xd2:m -U lfuse:w:0xff:m
 # Tune the lines below only if you know what you are doing:
 
 AVRDUDE = avrdude $(PROGRAMMER) -p $(DEVICE) -B 10 -F
-COMPILE = avr-gcc -Wall -Os -DF_CPU=$(CLOCK) -mmcu=$(DEVICE) -I. -ffunction-sections -fdata-sections
+COMPILE = avr-g++ -Wall -Wextra -Os -DF_CPU=$(CLOCK) -mmcu=$(DEVICE) -I. -ffunction-sections -fdata-sections
 
 OBJECTS = $(addprefix $(BUILDDIR)/,$(notdir $(SOURCE:.c=.o)))
 

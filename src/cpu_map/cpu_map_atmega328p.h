@@ -28,11 +28,11 @@
 
 #define GRBL_PLATFORM "Atmega328p"
 
-// Define serial port pins and interrupt vectors.
-#define SERIAL_RX     USART_RX_vect
-#define SERIAL_UDRE   USART_UDRE_vect
+// OK/ Define serial port pins and interrupt vectors.
+#define SERIAL_RX     USART_RX_vect		// USART Rx Complete
+#define SERIAL_UDRE   USART_UDRE_vect	// USART, Data Register Empty
 
-// Define step pulse output pins. NOTE: All step bit pins must be on the same port.
+// OK/ Define step pulse output pins. NOTE: All step bit pins must be on the same port.
 #define STEP_DDR        DDRD
 #define STEP_PORT       PORTD
 #define X_STEP_BIT      2  // Uno Digital Pin 2
@@ -40,7 +40,7 @@
 #define Z_STEP_BIT      4  // Uno Digital Pin 4
 #define STEP_MASK       ((1<<X_STEP_BIT)|(1<<Y_STEP_BIT)|(1<<Z_STEP_BIT)) // All step bits
 
-// Define step direction output pins. NOTE: All direction pins must be on the same port.
+// OK/ Define step direction output pins. NOTE: All direction pins must be on the same port.
 #define DIRECTION_DDR     DDRD
 #define DIRECTION_PORT    PORTD
 #define X_DIRECTION_BIT   5  // Uno Digital Pin 5
@@ -48,23 +48,24 @@
 #define Z_DIRECTION_BIT   7  // Uno Digital Pin 7
 #define DIRECTION_MASK    ((1<<X_DIRECTION_BIT)|(1<<Y_DIRECTION_BIT)|(1<<Z_DIRECTION_BIT)) // All direction bits
 
-// Define stepper driver enable/disable output pin.
+// OK/ Define stepper driver enable/disable output pin.
 #define STEPPERS_DISABLE_DDR    DDRB
 #define STEPPERS_DISABLE_PORT   PORTB
 #define STEPPERS_DISABLE_BIT    0  // Uno Digital Pin 8
 #define STEPPERS_DISABLE_MASK   (1<<STEPPERS_DISABLE_BIT)
+
 
 // Define homing/hard limit switch input pins and limit interrupt vectors. 
 // NOTE: All limit bit pins must be on the same port, but not on a port with other input pins (CONTROL).
 #define LIMIT_DDR        DDRB
 #define LIMIT_PIN        PINB
 #define LIMIT_PORT       PORTB
-
 #define X_LIMIT_BIT      1  // Uno Digital Pin 9
 #define Y_LIMIT_BIT      2  // Uno Digital Pin 10
-#define Z_LIMIT_BIT    3  // Uno Digital Pin 11
+#define Z_LIMIT_BIT      3  // Uno Digital Pin 11
 
 #define LIMIT_MASK       ((1<<X_LIMIT_BIT)|(1<<Y_LIMIT_BIT)|(1<<Z_LIMIT_BIT)) // All limit bits
+
 #define LIMIT_INT        PCIE0  // Pin change interrupt enable pin
 #define LIMIT_INT_vect   PCINT0_vect 
 #define LIMIT_PCMSK      PCMSK0 // Pin change interrupt register

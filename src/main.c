@@ -1,57 +1,119 @@
 /*
-  main.c - An embedded CNC Controller with rs274/ngc (g-code) support
-  Part of Grbl
-  
-  Copyright (c) 2011-2015 Sungeun K. Jeon
-  Copyright (c) 2009-2011 Simen Svale Skogsrud
-  
-  Grbl is free software: you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation, either version 3 of the License, or
-  (at your option) any later version.
+  main.c
 
-  Grbl is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
+http://gammon.com.au/interrupts
+ 1  Reset
+ 2  External Interrupt Request 0  (pin D2)          (INT0_vect)
+ 3  External Interrupt Request 1  (pin D3)          (INT1_vect)
+ 4  Pin Change Interrupt Request 0 (pins D8 to D13) (PCINT0_vect)
+ 5  Pin Change Interrupt Request 1 (pins A0 to A5)  (PCINT1_vect)
+ 6  Pin Change Interrupt Request 2 (pins D0 to D7)  (PCINT2_vect)
+ 7  Watchdog Time-out Interrupt                     (WDT_vect)
+ 8  Timer/Counter2 Compare Match A                  (TIMER2_COMPA_vect)
+ 9  Timer/Counter2 Compare Match B                  (TIMER2_COMPB_vect)
+10  Timer/Counter2 Overflow                         (TIMER2_OVF_vect)
+11  Timer/Counter1 Capture Event                    (TIMER1_CAPT_vect)
+12  Timer/Counter1 Compare Match A                  (TIMER1_COMPA_vect)
+13  Timer/Counter1 Compare Match B                  (TIMER1_COMPB_vect)
+14  Timer/Counter1 Overflow                         (TIMER1_OVF_vect)
+15  Timer/Counter0 Compare Match A                  (TIMER0_COMPA_vect)
+16  Timer/Counter0 Compare Match B                  (TIMER0_COMPB_vect)
+17  Timer/Counter0 Overflow                         (TIMER0_OVF_vect)
+18  SPI Serial Transfer Complete                    (SPI_STC_vect)
+19  USART Rx Complete                               (USART_RX_vect)
+20  USART, Data Register Empty                      (USART_UDRE_vect)
+21  USART, Tx Complete                              (USART_TX_vect)
+22  ADC Conversion Complete                         (ADC_vect)
+23  EEPROM Ready                                    (EE_READY_vect)
+24  Analog Comparator                               (ANALOG_COMP_vect)
+25  2-wire Serial Interface  (I2C)                  (TWI_vect)
+26  Store Program Memory Ready                      (SPM_READY_vect)
 
-  You should have received a copy of the GNU General Public License
-  along with Grbl.  If not, see <http://www.gnu.org/licenses/>.
 */
-
-#include "main.h"
 
 #include <avr/io.h>
 #include <stdbool.h>
 #include <avr/interrupt.h>
 
+#include "main.h"
+#include "serial.h"
+#include "limits.h"
+#include "steppers.h"
+#include "commands.h"
+
+void print_limits()
+{
+	int i;
+	print_pstr("LRT=");
+	uint8_t bs= limits_get_current_state()>>1;
+	for(i=0; i<3; ++i)
+	{
+		print_string((bs&1) ? "*" : "-");
+		bs>>=1;
+	}
+	print_pstr("  L=");
+
+	bs= limits_sticky_states>>1;
+	for(i=0; i<3; ++i)
+	{
+		print_string((bs&1) ? "*" : "-");
+		bs>>=1;
+	}
+	print_pstr("\n");
+}
+
+
 int main(void)
 {
-	cli();
 	// Initialize system upon power-up.
+	cli();
+
 	serial_init();   // Setup serial baud rate and interrupts
-	millis_init();
+	limits_init();
 	stepper_init();
+	sei(); // Enable timers
 
 	serial_reset_read_buffer(); // Clear serial read buffer
 	print_pstr("Y:booted\n");
 
-	sei(); // Enable timers
+	print_free_memory();
 
+	stepper_power(false);
+	delay_ms(4000);
+	stepper_power(true);
+
+	for(int pass= 0; pass<1; ++pass)
+	{
+		print_limits();
+		print_string("pos="); print_integer(stepper_get_position(0)); delay_ms(500);
+
+		print_string("forward\n");
+		stepper_set_target(0,200); while(stepper_is_moving(0)) ;
+
+		print_string("pos="); print_integer(stepper_get_position(0)); delay_ms(500);
+
+		print_string("reverse\n");
+		stepper_set_target(0,0); while(stepper_is_moving(0)) ;
+	}
+
+	print_string("pos="); print_integer(stepper_get_position(0)); delay_ms(500);
+	stepper_power(false);
+/*
 	uint64_t m= millis();
-	int cycle_len=3000;
+	uint64_t cycle_len=3000;
 	while(1)
 	{
 		command_collect();
 
 		uint64_t m2= millis();
 		if(m2-m>cycle_len)
+
 		{
 			serial_write('!');
 			m= m+cycle_len;
 		}
 	}
-
-	return 0;   /* Never reached */
+*/
+	for(;;)
+	return 0; // Never reached
 }
-

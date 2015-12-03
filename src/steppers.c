@@ -26,40 +26,41 @@ C (analog input pins)
 D (digital pins 0 to 7)
 */
 #include "main.h"
+#include "steppers.h"
+#include "limits.h"
+#include "serial.h"
 
-typedef struct stepper_data
-{
-	int32_t source;		// source of current movement
-	int32_t position;	// position within [source,target]
-	int32_t target;		// target position
-	uint32_t accu;		// accumulator TODO: uint16_t and check OVH in assembler
-} stepper_data;
+#define STEPPER_STEPS_TO_FULL_SPEED	600		// number of stepper steps (i.e. distance) before it can reach full speed
+#define STEPPER_MIN_SPEED			100		// minimum safe speed for abrupt start and stop
+#define STEPPER_MAX_SPEED			1500	// stepper full speed (increase to the accumulator at each interrupt)
+#define FIXED_POINT					1500	// (half) movement occurs when accumulator overshoots this value (lower or equal to STEPPER_MAX_SPEED)
+#define BASE_TIMER_PERIOD			125		// how often the interrupt fires (clk * 8)
 
 stepper_data steppers[3];
 
+#define DIRECTION_POS(axis)  PORTD |=  (1<<(axis+5))
+#define DIRECTION_NEG(axis)  PORTD &= ~(1<<(axis+5))
+#define HALF_STEP(axis)      PORTD ^=   1<<(axis+2)
+
+
 void stepper_init_hw()
 {
-	uint8_t sreg = SREG;
-	cli();
+	DDRD |=  0b11111100;  // sets Arduino pins 2-7 as outputs (3 for steps and 3 for dirs)
+	DDRB |=  0b00000001;  // sets Arduino pin 8 as output (enable)
 
-	// Configure directions and status
-	STEP_DDR      |= _BV(X_STEP_BIT)      | _BV(Y_STEP_BIT)      | _BV(Z_STEP_BIT);
-	DIRECTION_DDR |= _BV(X_DIRECTION_BIT) | _BV(Y_DIRECTION_BIT) | _BV(Z_DIRECTION_BIT);
+	// set up Timer 1 for stepper movement
+	TCCR1A= 0;						// normal operation
+	TCCR1B= bit(WGM12) | bit(CS11);	// CTC, no pre-scaling 1/8 (CS10 would be 1:1)
+	OCR1A=  BASE_TIMER_PERIOD;		// compare A register value (N * clock speed)
+	TIMSK1= bit (OCIE1A);			// interrupt on Compare A Match
+}
 
-	STEP_PORT = 0xFF;
-
-	// set compare match register to desired timer count:
-	OCR1A = 8000;
-	// turn on CTC mode:
-	TCCR1B |= (1 << WGM12);
-	// No prescaling (fastest clock rate):
-	TCCR1B |= (1 << CS10);
-	TCCR1B |= (0 << CS11);
-	TCCR1B |= (0 << CS12);
-	// enable timer compare interrupt:
-	TIMSK1 |= (1 << OCIE1A);
-
-	SREG= sreg;
+void stepper_power(bool s)
+{
+	if(s)
+		STEPPERS_DISABLE_PORT &= ~(1<<STEPPERS_DISABLE_BIT);
+	else
+		STEPPERS_DISABLE_PORT |=  (1<<STEPPERS_DISABLE_BIT);
 }
 
 void stepper_init()
@@ -67,20 +68,38 @@ void stepper_init()
 	int i;
 	for(i=0; i<3; ++i)
 	{
-		stepper_data* s = &steppers[i];
+		volatile stepper_data* s = &steppers[i];
 		s->source= 0;
 		s->position= 0;
 		s->target= 0;
-		s->accu= 0;
+		s->fp_accu= 0;
 	}
 	stepper_init_hw();
+	stepper_power(true);
 }
 
-#define STEP_HALF_MOVE(step_bit)  STEP_PORT = STEP_PORT ^ (1<<(step_bit))
+void stepper_set_target(uint8_t axis, int32_t target_in_absolute_steps)
+{
+	cli();
+	volatile stepper_data* s = &steppers[axis];
+	if(target_in_absolute_steps > s->position)
+		DIRECTION_POS(axis);
+	else
+		DIRECTION_NEG(axis);
+	s->source= s->position;
+	s->target= target_in_absolute_steps*2; // x2 because of 2-phase signal
+	sei();
+}
 
-#define STEPPER_STEPS_TO_FULL_SPEED  1000
-#define STEPPER_MIN_ACCELERATION     5
-#define STEPPER_MAX_ACCELERATION     100
+int32_t stepper_get_position(uint8_t axis)
+{
+	return steppers[axis].position/2;
+}
+
+bool stepper_is_moving(uint8_t axis)
+{
+	return (steppers[axis].target - steppers[axis].position != 0);
+}
 
 // Stepper acceleration theory and profile:  http://www.ti.com/lit/an/slyt482/slyt482.pdf
 // Todo: https://en.wikipedia.org/wiki/Smoothstep ? precomputed bicubic speed variation?
@@ -88,43 +107,51 @@ void stepper_init()
 // timer1 count down
 ISR(TIMER1_COMPA_vect)
 {
-	int i;
-	for(i=0; i<3; ++i)
+	for(int i=0;i<3;++i)
 	{
 		stepper_data* s = &steppers[i];
 
-		// How far are we to the target?
-		int32_t delta_pos= s->target - s->position;
-		if(delta_pos==0) continue; // already there
-
-		// Set movement direction
-		if(delta_pos>0)
-			bset(DIRECTION_DDR, X_DIRECTION_BIT+i);
-		else
-			bclr(DIRECTION_DDR, X_DIRECTION_BIT+i);
-
-		// Set speed according to the distance from the bounds
-		int16_t delta_speed;
-		if(s->position - s->source < STEPPER_STEPS_TO_FULL_SPEED)
-			delta_speed= ((STEPPER_MAX_ACCELERATION-STEPPER_MIN_ACCELERATION) * (s->position - s->source)) / STEPPER_STEPS_TO_FULL_SPEED;
-		else if(delta_pos < STEPPER_STEPS_TO_FULL_SPEED)
-			delta_speed= ((STEPPER_MAX_ACCELERATION-STEPPER_MIN_ACCELERATION) * delta_pos) / STEPPER_STEPS_TO_FULL_SPEED;
-		else // full speed
-			delta_speed= (STEPPER_MAX_ACCELERATION-STEPPER_MIN_ACCELERATION);
-
-		delta_speed+= STEPPER_MIN_ACCELERATION; //avoid stalling!
-
-		// Accumulate and do the movement
-		s->accu+= delta_speed;
-		if(s->accu & 0x10000) // overflow
+		if(limit_is_hit(i))
 		{
-			s->accu &= 0xFFFF;
-			if(delta_pos>0)
-				s->position++;
-			else
-				--s->position;
-			STEP_HALF_MOVE(X_STEP_BIT+i);
+			s->target= s->position; // stop here
+			print_string("endstop hit\n");
+			return;
 		}
 
+		// How far are we from the target?
+		int32_t steps_to_dest= s->target - s->position;
+		if(steps_to_dest==0) continue; // already there
+		if(steps_to_dest<0) steps_to_dest= -steps_to_dest; // direction was set already in stepper_set_target()
+
+		// Set speed according to the distance from the bounds
+		int32_t speed;
+		if(steps_to_dest < STEPPER_STEPS_TO_FULL_SPEED)
+			speed= STEPPER_MIN_SPEED
+				+ ((STEPPER_MAX_SPEED-STEPPER_MIN_SPEED) * steps_to_dest)
+				 / STEPPER_STEPS_TO_FULL_SPEED;
+		else
+		{
+			// How far are we from the source?
+			int32_t steps_from_source= s->position - s->source;
+			if(steps_from_source<0) steps_from_source= -steps_from_source;
+			if(steps_from_source < STEPPER_STEPS_TO_FULL_SPEED)
+				speed= STEPPER_MIN_SPEED
+					+ ((STEPPER_MAX_SPEED-STEPPER_MIN_SPEED) * steps_from_source)
+					/ STEPPER_STEPS_TO_FULL_SPEED;
+			else // far from both bounds, so run full speed
+				speed= STEPPER_MAX_SPEED;
+		}
+
+		// Accumulate and do the movement
+		s->fp_accu+= speed;
+		while(s->fp_accu > FIXED_POINT) // "while" should not happen :/
+		{
+			s->fp_accu-= FIXED_POINT;
+			if(s->target - s->position>0)
+				++s->position;
+			else
+				--s->position;
+			HALF_STEP(X_STEP_BIT+i);
+		}
 	}
 }

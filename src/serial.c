@@ -20,7 +20,7 @@
 */
 
 #include "main.h"
-
+#include "serial.h"
 
 uint8_t serial_rx_buffer[RX_BUFFER_SIZE];
 uint8_t serial_rx_buffer_head = 0;
@@ -31,17 +31,123 @@ uint8_t serial_tx_buffer_head = 0;
 volatile uint8_t serial_tx_buffer_tail = 0;
 
 
-#ifdef ENABLE_XONXOFF
-  volatile uint8_t flow_ctrl = XON_SENT; // Flow control state variable
-#endif
+void serial_init()
+{
+	// Set baud rate
+	#if BAUD_RATE < 57600
+		uint16_t UBRR0_value = ((F_CPU / (8L * BAUD_RATE)) - 1)/2 ;
+		UCSR0A &= ~(1 << U2X0); // baud doubler off  - Only needed on Uno XXX
+	#else
+		uint16_t UBRR0_value = ((F_CPU / (4L * BAUD_RATE)) - 1)/2;
+		UCSR0A |= (1 << U2X0);  // baud doubler on for high baud rates, i.e. 115200
+	#endif
+	UBRR0H = UBRR0_value >> 8;
+	UBRR0L = UBRR0_value;
+
+	// enable rx and tx
+	UCSR0B = (1<<RXEN0) | (1<<TXEN0);
+	
+	// enable interrupt on complete reception of a byte
+	UCSR0B |= 1<<RXCIE0;
+	// defaults to 8-bit, no parity, 1 stop bit
+}
+
+
+// Writes one byte to the TX serial buffer. Called by main program.
+// TODO: Check if we can speed this up for writing strings, rather than single bytes.
+void serial_write(uint8_t data)
+{
+	// Calculate next head
+	uint8_t next_head = serial_tx_buffer_head + 1;
+	if (next_head == sizeof(serial_tx_buffer))
+		next_head = 0;
+
+	// Wait until there is space in the buffer
+	while (next_head == serial_tx_buffer_tail)
+	{
+		// TODO: Restructure st_prep_buffer() calls to be executed here during a long print.
+		// if (sys_rt_exec_state & EXEC_RESET) { return; } // Only check for abort to avoid an endless loop.
+	}
+
+	// Store data and advance head
+	serial_tx_buffer[serial_tx_buffer_head] = data;
+	serial_tx_buffer_head = next_head;
+
+	// Enable Data Register Empty Interrupt to make sure tx-streaming is running
+	UCSR0B |=  (1 << UDRIE0);
+}
+
+
+// Data Register Empty Interrupt handler
+ISR(USART_UDRE_vect)
+{
+  uint8_t tail = serial_tx_buffer_tail; // Temporary serial_tx_buffer_tail (to optimize for volatile)
   
+	// Send a byte from the buffer
+	UDR0 = serial_tx_buffer[tail];
+
+	// Update tail position
+	tail++;
+	if (tail == sizeof(serial_tx_buffer))
+		tail = 0;
+
+	serial_tx_buffer_tail = tail;
+
+	// Turn off Data Register Empty Interrupt to stop tx-streaming if this concludes the transfer
+	if (tail == serial_tx_buffer_head)
+		UCSR0B &= ~(1 << UDRIE0);
+}
+
+
+// Fetches the first byte in the serial read buffer. Called by main program.
+uint8_t serial_read()
+{
+	uint8_t tail = serial_rx_buffer_tail; // Temporary serial_rx_buffer_tail (to optimize for volatile)
+	if (serial_rx_buffer_head == tail)
+		return 0;
+
+	uint8_t data = serial_rx_buffer[tail];
+
+	tail++;
+	if (tail == sizeof(serial_rx_buffer))
+		tail = 0;
+	serial_rx_buffer_tail = tail;
+
+	return data;
+}
+
+
+ISR(USART_RX_vect)
+{
+	uint8_t data = UDR0;
+	uint8_t next_head;
+
+	next_head = serial_rx_buffer_head + 1;
+	if (next_head == sizeof(serial_rx_buffer))
+	  next_head = 0;
+
+	// Write data to buffer unless it is full.
+	if (next_head != serial_rx_buffer_tail)
+	{
+		serial_rx_buffer[serial_rx_buffer_head] = data;
+		serial_rx_buffer_head = next_head;
+
+	}
+}
+
+void serial_reset_read_buffer() 
+{
+	serial_rx_buffer_tail = serial_rx_buffer_head;
+}
+
 
 // Returns the number of bytes used in the RX serial buffer.
 uint8_t serial_get_rx_buffer_count()
 {
   uint8_t rtail = serial_rx_buffer_tail; // Copy to limit multiple calls to volatile
-  if (serial_rx_buffer_head >= rtail) { return(serial_rx_buffer_head-rtail); }
-  return (RX_BUFFER_SIZE - (rtail-serial_rx_buffer_head));
+  if (serial_rx_buffer_head >= rtail)
+	  return(serial_rx_buffer_head-rtail);
+  return (sizeof(serial_rx_buffer) - (rtail-serial_rx_buffer_head));
 }
 
 
@@ -49,257 +155,104 @@ uint8_t serial_get_rx_buffer_count()
 // NOTE: Not used except for debugging and ensuring no TX bottlenecks.
 uint8_t serial_get_tx_buffer_count()
 {
-  uint8_t ttail = serial_tx_buffer_tail; // Copy to limit multiple calls to volatile
-  if (serial_tx_buffer_head >= ttail) { return(serial_tx_buffer_head-ttail); }
-  return (TX_BUFFER_SIZE - (ttail-serial_tx_buffer_head));
+	uint8_t ttail = serial_tx_buffer_tail; // Copy to limit multiple calls to volatile
+	if (serial_tx_buffer_head >= ttail)
+		return(serial_tx_buffer_head-ttail);
+	return (sizeof(serial_tx_buffer) - (ttail-serial_tx_buffer_head));
 }
 
 
-void serial_init()
+// ======================== PRINTING ROUTINES
+
+
+void print_char(const char s)
 {
-	uint8_t sreg = SREG;
-	cli();
-
-	// Set baud rate
-  #if BAUD_RATE < 57600
-    uint16_t UBRR0_value = ((F_CPU / (8L * BAUD_RATE)) - 1)/2 ;
-    UCSR0A &= ~(1 << U2X0); // baud doubler off  - Only needed on Uno XXX
-  #else
-    uint16_t UBRR0_value = ((F_CPU / (4L * BAUD_RATE)) - 1)/2;
-    UCSR0A |= (1 << U2X0);  // baud doubler on for high baud rates, i.e. 115200
-  #endif
-  UBRR0H = UBRR0_value >> 8;
-  UBRR0L = UBRR0_value;
-            
-  // enable rx and tx
-  UCSR0B |= 1<<RXEN0;
-  UCSR0B |= 1<<TXEN0;
-	
-  // enable interrupt on complete reception of a byte
-  UCSR0B |= 1<<RXCIE0;
-  // defaults to 8-bit, no parity, 1 stop bit
-
-  SREG= sreg;
+	serial_write(s);
 }
-
-
-// Writes one byte to the TX serial buffer. Called by main program.
-// TODO: Check if we can speed this up for writing strings, rather than single bytes.
-void serial_write(uint8_t data) {
-  // Calculate next head
-  uint8_t next_head = serial_tx_buffer_head + 1;
-  if (next_head == TX_BUFFER_SIZE) { next_head = 0; }
-
-  // Wait until there is space in the buffer
-  while (next_head == serial_tx_buffer_tail) { 
-    // TODO: Restructure st_prep_buffer() calls to be executed here during a long print.    
-    // if (sys_rt_exec_state & EXEC_RESET) { return; } // Only check for abort to avoid an endless loop.
-  }
-
-  // Store data and advance head
-  serial_tx_buffer[serial_tx_buffer_head] = data;
-  serial_tx_buffer_head = next_head;
-  
-  // Enable Data Register Empty Interrupt to make sure tx-streaming is running
-  UCSR0B |=  (1 << UDRIE0); 
-}
-
-
-// Data Register Empty Interrupt handler
-ISR(SERIAL_UDRE)
-{
-  uint8_t tail = serial_tx_buffer_tail; // Temporary serial_tx_buffer_tail (to optimize for volatile)
-  
-  #ifdef ENABLE_XONXOFF
-    if (flow_ctrl == SEND_XOFF) { 
-      UDR0 = XOFF_CHAR; 
-      flow_ctrl = XOFF_SENT; 
-    } else if (flow_ctrl == SEND_XON) { 
-      UDR0 = XON_CHAR; 
-      flow_ctrl = XON_SENT; 
-    } else
-  #endif
-  { 
-    // Send a byte from the buffer	
-    UDR0 = serial_tx_buffer[tail];
-  
-    // Update tail position
-    tail++;
-    if (tail == TX_BUFFER_SIZE) { tail = 0; }
-  
-    serial_tx_buffer_tail = tail;
-  }
-  
-  // Turn off Data Register Empty Interrupt to stop tx-streaming if this concludes the transfer
-  if (tail == serial_tx_buffer_head) { UCSR0B &= ~(1 << UDRIE0); }
-}
-
-
-// Fetches the first byte in the serial read buffer. Called by main program.
-uint8_t serial_read()
-{
-  uint8_t tail = serial_rx_buffer_tail; // Temporary serial_rx_buffer_tail (to optimize for volatile)
-  if (serial_rx_buffer_head == tail) {
-    return SERIAL_NO_DATA;
-  } else {
-    uint8_t data = serial_rx_buffer[tail];
-    
-    tail++;
-    if (tail == RX_BUFFER_SIZE) { tail = 0; }
-    serial_rx_buffer_tail = tail;
-
-    #ifdef ENABLE_XONXOFF
-      if ((serial_get_rx_buffer_count() < RX_BUFFER_LOW) && flow_ctrl == XOFF_SENT) { 
-        flow_ctrl = SEND_XON;
-        UCSR0B |=  (1 << UDRIE0); // Force TX
-      }
-    #endif
-    
-    return data;
-  }
-}
-
-
-ISR(SERIAL_RX)
-{
-  uint8_t data = UDR0;
-  uint8_t next_head;
-  
-  // Pick off realtime command characters directly from the serial stream. These characters are
-  // not passed into the buffer, but these set system state flag bits for realtime execution.
-  switch (data) {
-    default: // Write character to buffer    
-      next_head = serial_rx_buffer_head + 1;
-      if (next_head == RX_BUFFER_SIZE) { next_head = 0; }
-    
-      // Write data to buffer unless it is full.
-      if (next_head != serial_rx_buffer_tail) {
-        serial_rx_buffer[serial_rx_buffer_head] = data;
-        serial_rx_buffer_head = next_head;    
-        
-        #ifdef ENABLE_XONXOFF
-          if ((serial_get_rx_buffer_count() >= RX_BUFFER_FULL) && flow_ctrl == XON_SENT) {
-            flow_ctrl = SEND_XOFF;
-            UCSR0B |=  (1 << UDRIE0); // Force TX
-          } 
-        #endif
-        
-      }
-      //TODO: else alarm on overflow?
-  }
-}
-
-
-void serial_reset_read_buffer() 
-{
-  serial_rx_buffer_tail = serial_rx_buffer_head;
-
-  #ifdef ENABLE_XONXOFF
-    flow_ctrl = XON_SENT;
-  #endif
-}
-
 
 
 void print_string(const char *s)
 {
-  while (*s)
-    serial_write(*s++);
+	while (*s)
+		serial_write(*s++);
 }
 
 
 // Print a string stored in PGM-memory
 void _print_pstr(const char *s)
 {
-  char c;
-  while ((c = pgm_read_byte_near(s++)))
-    serial_write(c);
+	char c;
+	while ((c = pgm_read_byte_near(s++)))
+		serial_write(c);
 }
-
-
-// void printIntegerInBase(unsigned long n, unsigned long base)
-// {
-// 	unsigned char buf[8 * sizeof(long)]; // Assumes 8-bit chars.
-// 	unsigned long i = 0;
-//
-// 	if (n == 0) {
-// 		serial_write('0');
-// 		return;
-// 	}
-//
-// 	while (n > 0) {
-// 		buf[i++] = n % base;
-// 		n /= base;
-// 	}
-//
-// 	for (; i > 0; i--)
-// 		serial_write(buf[i - 1] < 10 ?
-// 			'0' + buf[i - 1] :
-// 			'A' + buf[i - 1] - 10);
-// }
-
 
 // Prints an uint8 variable with base and number of desired digits.
 void print_unsigned_int8(uint8_t n, uint8_t base, uint8_t digits)
 {
-  unsigned char buf[digits];
-  uint8_t i = 0;
+	unsigned char buf[digits];
+	uint8_t i = 0;
 
-  for (; i < digits; i++) {
-      buf[i] = n % base ;
-      n /= base;
-  }
+	for (; i < digits; i++)
+	{
+		uint8_t d= n % base ;
+		buf[i]= d<10 ? ('0' + d) : ('a'+d);
+		n /= base;
+	}
 
-  for (; i > 0; i--)
-      serial_write('0' + buf[i - 1]);
+	for (; i > 0; i--)
+		serial_write(buf[i - 1]);
 }
 
 
 // Prints an uint8 variable in base 2.
-void print_uint8_base2(uint8_t n) {
-  print_unsigned_int8(n,2,8);
+void print_uint8_base2(uint8_t n)
+{
+	print_unsigned_int8(n,2,8);
 }
 
 
 // Prints an uint8 variable in base 10.
 void print_uint8_base10(uint8_t n)
 {
-  uint8_t digits;
-  if (n < 10) { digits = 1; }
-  else if (n < 100) { digits = 2; }
-  else { digits = 3; }
-  print_unsigned_int8(n,10,digits);
+	uint8_t digits;
+	if (n < 10) digits = 1;
+	else if (n < 100) digits = 2;
+	else digits = 3;
+	print_unsigned_int8(n,10,digits);
 }
 
 
 void print_uint32_base10(uint32_t n)
 {
-  if (n == 0) {
-    serial_write('0');
-    return;
-  }
+	if (n == 0)
+	{
+		serial_write('0');
+		return;
+	}
 
-  unsigned char buf[10];
-  uint8_t i = 0;
+	unsigned char buf[10];
+	uint8_t i = 0;
 
-  while (n > 0) {
-    buf[i++] = n % 10;
-    n /= 10;
-  }
+	while (n > 0)
+	{
+		buf[i++] = n % 10;
+		n /= 10;
+	}
 
-  for (; i > 0; i--)
-    serial_write('0' + buf[i-1]);
+	for (; i > 0; i--)
+		serial_write('0' + buf[i-1]);
 }
 
 
-void printInteger(long n)
+void print_integer(long n)
 {
-  if (n < 0) {
-    serial_write('-');
-    print_uint32_base10(-n);
-  } else {
-    print_uint32_base10(n);
-  }
+	if (n >= 0)
+		print_uint32_base10(n);
+	else
+	{
+		serial_write('-');
+		print_uint32_base10(-n);
+	}
 }
 
 
@@ -308,7 +261,7 @@ void printInteger(long n)
 // may be set by the user. The integer is then efficiently converted to a string.
 // NOTE: AVR '%' and '/' integer operations are very efficient. Bitshifting speed-up
 // techniques are actually just slightly slower. Found this out the hard way.
-void printFloat(float n, uint8_t decimal_places)
+void print_float(float n, uint8_t decimal_places)
 {
   if (n < 0) {
     serial_write('-');
@@ -352,24 +305,20 @@ void printFloat(float n, uint8_t decimal_places)
 //  - CoordValue: Handles all position or coordinate values in inches or mm reporting.
 //  - RateValue: Handles feed rate and current velocity in inches or mm reporting.
 //  - SettingValue: Handles all floating point settings values (always in mm.)
-void printFloat_CoordValue(float n) {
-    printFloat(n,N_DECIMAL_COORDVALUE_MM);
+void print_float(float n)
+{
+    print_float(n,2);
 }
-
-void printFloat_RateValue(float n) {
-    printFloat(n,N_DECIMAL_RATEVALUE_MM);
-}
-
-void printFloat_SettingValue(float n) { printFloat(n,N_DECIMAL_SETTINGVALUE); }
 
 
 // Debug tool to print free memory in bytes at the called point.
 // NOTE: Keep commented unless using. Part of this function always gets compiled in.
-// void printFreeMemory()
-// {
-//   extern int __heap_start, *__brkval;
-//   uint16_t free;  // Up to 64k values.
-//   free = (int) &free - (__brkval == 0 ? (int) &__heap_start : (int) __brkval);
-//   printInteger((int32_t)free);
-//   printString(" ");
-// }
+void print_free_memory()
+{
+	extern int __heap_start, *__brkval;
+	uint16_t free;  // Up to 64k values.
+	free = (int) &free - (__brkval == 0 ? (int) &__heap_start : (int) __brkval);
+	print_string("RAM:");
+	print_integer((int32_t)free);
+	print_char('\n');
+}

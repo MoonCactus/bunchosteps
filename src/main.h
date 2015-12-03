@@ -31,11 +31,6 @@
   #include "cpu_map/cpu_map_atmega2560.h"
 #endif
 
-#include "nuts_bolts.h"
-#include "time.h"
-#include "limits.h"
-#include "serial.h"
-#include "steppers.h"
-#include "commands.h"
+#include "utils.h"
 
 #endif /* MAIN_H_ */

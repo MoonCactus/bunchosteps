@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# Run this script in its own folder (hardcore bashism)
+DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+cd $DIR
+
 MORE_AVR_OPTS="-v"
 
 # First argument shall be "uno", "mega" or "auto"
