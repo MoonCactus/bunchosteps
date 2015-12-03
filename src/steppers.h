@@ -12,8 +12,9 @@
 typedef struct stepper_data
 {
 	int32_t source;		// source of current movement
-	volatile int32_t position;	// position within [source,target]
+	int32_t position;	// position within [source,target]
 	int32_t target;		// target position
+	int32_t steps_to_full_speed;
 	uint16_t fp_accu;	// fixed point accumulator
 } stepper_data;
 
@@ -23,8 +24,8 @@ extern volatile bool steppers_respect_endstop;
 
 void stepper_init();
 void stepper_power(bool s);
-void stepper_set_targets(int32_t target_in_absolute_steps);
-void stepper_set_target(uint8_t axis, int32_t target_in_absolute_steps);
+void stepper_set_targets(float target_in_absolute_mm);
+void stepper_set_target(uint8_t axis, float target_in_absolute_mm);
 bool stepper_is_moving(uint8_t axis);
 bool steppers_are_moving();
 

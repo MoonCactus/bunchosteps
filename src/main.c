@@ -73,7 +73,6 @@ int main(void)
 {
 	// Initialize system upon power-up.
 	cli();
-
 	serial_init();   // Setup serial baud rate and interrupts
 	limits_init();
 	stepper_init();
@@ -88,14 +87,14 @@ int main(void)
 	delay_ms(1000);
 	stepper_power(true);
 
-//	stepper_speed/=4;
+	stepper_speed/= 1;
 
-	for(int pass= 0; pass<6; ++pass)
+	for(int pass= 0; pass<5; ++pass)
 	{
-		stepper_set_targets(4000);
+		stepper_set_targets(-20.0);
 		while(steppers_are_moving()) if(limits_sticky_states) goto fail;
 
-		stepper_set_targets(0);
+		stepper_set_targets(0.0);
 		while(steppers_are_moving()) if(limits_sticky_states) goto fail;
 	}
 fail:
