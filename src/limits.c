@@ -31,7 +31,7 @@ void limits_init()
 	limits_enable();
 }
 
-uint8_t limits_get_current_state()
+uint8_t limits_get_current_states()
 {
   return (PINB & 0b00001110);
 }
@@ -44,5 +44,5 @@ bool limit_is_hit(int axis)
 
 ISR(PCINT0_vect) // DEFAULT: Limit pin change interrupt process.
 {
-	limits_sticky_states|= limits_get_current_state();
+	limits_sticky_states|= limits_get_current_states();
 }

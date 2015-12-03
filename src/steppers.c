@@ -30,18 +30,21 @@ D (digital pins 0 to 7)
 #include "limits.h"
 #include "serial.h"
 
-#define STEPPER_STEPS_TO_FULL_SPEED	600		// number of stepper steps (i.e. distance) before it can reach full speed
-#define STEPPER_MIN_SPEED			100		// minimum safe speed for abrupt start and stop
-#define STEPPER_MAX_SPEED			1500	// stepper full speed (increase to the accumulator at each interrupt)
-#define FIXED_POINT					1500	// (half) movement occurs when accumulator overshoots this value (lower or equal to STEPPER_MAX_SPEED)
-#define BASE_TIMER_PERIOD			125		// how often the interrupt fires (clk * 8)
+#define BASE_TIMER_PERIOD			64		// how often the interrupt fires (clk * 8) -- at max speed, half a step can be made on each interrupt -- lowest possible
 
-stepper_data steppers[3];
+#define STEPPER_STEPS_TO_FULL_SPEED	2048	// number of stepper steps (i.e. distance) before it can reach full speed
+#define STEPPER_MIN_SPEED			80		// minimum safe speed for abrupt start and stop
+#define STEPPER_MAX_SPEED			512		// stepper full speed (max. increase to the accumulator on each interrupt)
+#define FIXED_POINT_OVF				256		// (half) movement occurs when accumulator overshoots this value (lower or equal to STEPPER_MAX_SPEED)
 
-#define DIRECTION_POS(axis)  PORTD |=  (1<<(axis+5))
-#define DIRECTION_NEG(axis)  PORTD &= ~(1<<(axis+5))
-#define HALF_STEP(axis)      PORTD ^=   1<<(axis+2)
+volatile int32_t stepper_speed= STEPPER_MAX_SPEED;
 
+
+volatile stepper_data steppers[3];
+volatile bool steppers_respect_endstop= true;
+
+#define DIRECTION_POS(a)  PORTD |=  (1<<((a)+5))
+#define DIRECTION_NEG(a)  PORTD &= ~(1<<((a)+5))
 
 void stepper_init_hw()
 {
@@ -78,6 +81,24 @@ void stepper_init()
 	stepper_power(true);
 }
 
+#define STEPS_PER_MM 400
+
+void stepper_set_targets(int32_t target_in_absolute_steps)
+{
+	cli();
+	for(int axis=0; axis<3; ++axis)
+	{
+		volatile stepper_data* s = &steppers[axis];
+		if(target_in_absolute_steps > s->position)
+			DIRECTION_POS(axis);
+		else
+			DIRECTION_NEG(axis);
+		s->source= s->position;
+		s->target= target_in_absolute_steps; // x2 because of 2-phase signal
+	}
+	sei();
+}
+/*
 void stepper_set_target(uint8_t axis, int32_t target_in_absolute_steps)
 {
 	cli();
@@ -90,10 +111,16 @@ void stepper_set_target(uint8_t axis, int32_t target_in_absolute_steps)
 	s->target= target_in_absolute_steps*2; // x2 because of 2-phase signal
 	sei();
 }
+*/
 
 int32_t stepper_get_position(uint8_t axis)
 {
 	return steppers[axis].position/2;
+}
+
+int stepper_get_direction(uint8_t axis)
+{
+	return (PORTD & (1<<(axis+5))) ? +1 : -1;
 }
 
 bool stepper_is_moving(uint8_t axis)
@@ -101,19 +128,29 @@ bool stepper_is_moving(uint8_t axis)
 	return (steppers[axis].target - steppers[axis].position != 0);
 }
 
+bool steppers_are_moving()
+{
+	for(int axis=0;axis<3;++axis)
+		if(steppers[axis].target - steppers[axis].position != 0)
+			return true;
+	return false;
+}
+
+
+
 // Stepper acceleration theory and profile:  http://www.ti.com/lit/an/slyt482/slyt482.pdf
 // Todo: https://en.wikipedia.org/wiki/Smoothstep ? precomputed bicubic speed variation?
 
 // timer1 count down
 ISR(TIMER1_COMPA_vect)
 {
-	for(int i=0;i<3;++i)
+	for(uint8_t stepper_index=0;stepper_index<3;++stepper_index)
 	{
-		stepper_data* s = &steppers[i];
+		volatile stepper_data* s = &steppers[stepper_index];
 
-		if(limit_is_hit(i))
+		if(steppers_respect_endstop && limit_is_hit(stepper_index))
 		{
-			s->target= s->position; // stop here
+			s->target= s->position; // no move, and stop here
 			print_string("endstop hit\n");
 			return;
 		}
@@ -126,32 +163,28 @@ ISR(TIMER1_COMPA_vect)
 		// Set speed according to the distance from the bounds
 		int32_t speed;
 		if(steps_to_dest < STEPPER_STEPS_TO_FULL_SPEED)
-			speed= STEPPER_MIN_SPEED
-				+ ((STEPPER_MAX_SPEED-STEPPER_MIN_SPEED) * steps_to_dest)
-				 / STEPPER_STEPS_TO_FULL_SPEED;
+			speed= STEPPER_MIN_SPEED + ((stepper_speed-STEPPER_MIN_SPEED) * steps_to_dest) / STEPPER_STEPS_TO_FULL_SPEED;
 		else
 		{
 			// How far are we from the source?
 			int32_t steps_from_source= s->position - s->source;
 			if(steps_from_source<0) steps_from_source= -steps_from_source;
 			if(steps_from_source < STEPPER_STEPS_TO_FULL_SPEED)
-				speed= STEPPER_MIN_SPEED
-					+ ((STEPPER_MAX_SPEED-STEPPER_MIN_SPEED) * steps_from_source)
-					/ STEPPER_STEPS_TO_FULL_SPEED;
+				speed= STEPPER_MIN_SPEED + ((stepper_speed-STEPPER_MIN_SPEED) * steps_from_source) / STEPPER_STEPS_TO_FULL_SPEED;
 			else // far from both bounds, so run full speed
-				speed= STEPPER_MAX_SPEED;
+				speed= stepper_speed;
 		}
 
 		// Accumulate and do the movement
 		s->fp_accu+= speed;
-		while(s->fp_accu > FIXED_POINT) // "while" should not happen :/
+		while(s->fp_accu > FIXED_POINT_OVF) // "while" should not happen :/
 		{
-			s->fp_accu-= FIXED_POINT;
+			s->fp_accu-= FIXED_POINT_OVF;
 			if(s->target - s->position>0)
 				++s->position;
 			else
 				--s->position;
-			HALF_STEP(X_STEP_BIT+i);
+			PORTD ^=  1<<(stepper_index+2);	// half a step
 		}
 	}
 }

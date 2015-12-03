@@ -45,7 +45,7 @@ void print_limits()
 {
 	int i;
 	print_pstr("LRT=");
-	uint8_t bs= limits_get_current_state()>>1;
+	uint8_t bs= limits_get_current_states()>>1;
 	for(i=0; i<3; ++i)
 	{
 		print_string((bs&1) ? "*" : "-");
@@ -62,6 +62,12 @@ void print_limits()
 	print_pstr("\n");
 }
 
+void print_tmp_stats()
+{
+	print_string(" ...pos="); print_integer(stepper_get_position(0));
+	print_string(" dir="); print_integer(stepper_get_direction(0));
+	print_string("\n"); delay_ms(500);
+}
 
 int main(void)
 {
@@ -79,26 +85,26 @@ int main(void)
 	print_free_memory();
 
 	stepper_power(false);
-	delay_ms(4000);
+	delay_ms(1000);
 	stepper_power(true);
 
-	for(int pass= 0; pass<1; ++pass)
+//	stepper_speed/=4;
+
+	for(int pass= 0; pass<6; ++pass)
 	{
-		print_limits();
-		print_string("pos="); print_integer(stepper_get_position(0)); delay_ms(500);
+		stepper_set_targets(4000);
+		while(steppers_are_moving()) if(limits_sticky_states) goto fail;
 
-		print_string("forward\n");
-		stepper_set_target(0,200); while(stepper_is_moving(0)) ;
-
-		print_string("pos="); print_integer(stepper_get_position(0)); delay_ms(500);
-
-		print_string("reverse\n");
-		stepper_set_target(0,0); while(stepper_is_moving(0)) ;
+		stepper_set_targets(0);
+		while(steppers_are_moving()) if(limits_sticky_states) goto fail;
 	}
-
-	print_string("pos="); print_integer(stepper_get_position(0)); delay_ms(500);
+fail:
 	stepper_power(false);
-/*
+	if(limits_sticky_states)
+		print_string("Fatal on limits.");
+
+
+	/*
 	uint64_t m= millis();
 	uint64_t cycle_len=3000;
 	while(1)
@@ -114,6 +120,9 @@ int main(void)
 		}
 	}
 */
+
+
+	print_string("Done, please reset.");
 	for(;;)
 	return 0; // Never reached
 }
