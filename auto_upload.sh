@@ -15,7 +15,8 @@ hex=${2-*.hex}
 [[ ! -f $hex ]] && echo "Hex file \"$hex\" not found, sorry" && exit 1
 
 # Run companion script in a detached windows if it is not already running
-pgrep -lf 'sh\s*.*/auto_serial.sh' || nohup konsole -e $(dirname $0)/auto_serial.sh >/dev/null 2>&1 &
+
+### pgrep -lf 'sh\s*.*/auto_serial.sh' || nohup konsole -e $(dirname $0)/auto_serial.sh >/dev/null 2>&1 &
 
 function remoteCtl
 {

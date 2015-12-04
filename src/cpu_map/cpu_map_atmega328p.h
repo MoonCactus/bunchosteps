@@ -51,6 +51,7 @@
 // OK/ Define stepper driver enable/disable output pin.
 #define STEPPERS_DISABLE_DDR    DDRB
 #define STEPPERS_DISABLE_PORT   PORTB
+#define STEPPERS_DISABLE_PIN    PINB
 #define STEPPERS_DISABLE_BIT    0  // Uno Digital Pin 8
 #define STEPPERS_DISABLE_MASK   (1<<STEPPERS_DISABLE_BIT)
 

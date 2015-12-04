@@ -8,7 +8,7 @@
 #include "main.h"
 #include "limits.h"
 
-volatile uint8_t limits_sticky_states= 0;
+volatile uint8_t sticky_limits= 0;
 
 // Enable hard limits.
 void limits_enable()
@@ -31,18 +31,18 @@ void limits_init()
 	limits_enable();
 }
 
-uint8_t limits_get_current_states()
+uint8_t limits_get_rt_states()
 {
-  return (PINB & 0b00001110);
+  return (PINB & 0b00001110)>>1;
 }
 
-bool limit_is_hit(int axis)
+bool sticky_limit_is_hit(int axis)
 {
-	return (limits_sticky_states & (1<<(axis+1)));
+	return (sticky_limits & (1<<axis));
 }
 
 
 ISR(PCINT0_vect) // DEFAULT: Limit pin change interrupt process.
 {
-	limits_sticky_states|= limits_get_current_states();
+	sticky_limits|= limits_get_rt_states();
 }

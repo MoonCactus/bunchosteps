@@ -22,14 +22,14 @@
 #ifndef serial_h
 #define serial_h
 
+#define SERIAL_NO_DATA 0
+
 #ifndef RX_BUFFER_SIZE
-  #define RX_BUFFER_SIZE 256
+  #define RX_BUFFER_SIZE 128
 #endif
 #ifndef TX_BUFFER_SIZE
-  #define TX_BUFFER_SIZE 256
+  #define TX_BUFFER_SIZE 128
 #endif
-
-#define SERIAL_NO_DATA 0xff
 
 #ifdef ENABLE_XONXOFF
   #define RX_BUFFER_FULL 96 // XOFF high watermark
@@ -66,8 +66,9 @@ void print_char(const char s);
 
 void print_string(const char *s);
 
-#define print_pstr(s) _print_pstr(PSTR(s))
-void _print_pstr(const char *s);
+#define print_pstr(s) _print_pstr(PSTR(s), 0)
+#define print_pstr_slow(s) _print_pstr(PSTR(s), 10)
+void _print_pstr(const char *s, int slow_us=0);
 
 void print_integer(long n);
 
@@ -84,8 +85,5 @@ void print_uint8_base10(uint8_t n);
 
 void print_float(float n, uint8_t decimal_places);
 void print_float(float n);
-
-// Debug tool to print free memory in bytes at the called point. Not used otherwise.
-void print_free_memory();
 
 #endif

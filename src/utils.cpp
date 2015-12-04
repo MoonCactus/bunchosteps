@@ -22,8 +22,22 @@
 #include "main.h"
 #include "utils.h"
 
+volatile bool nmi_reset= 0;
+
+
+// The following most entirely comes from GRBL
+
 #define MAX_INT_DIGITS 8 // Maximum number of digits in int32 (and float)
 
+// Debug tool to print free memory in bytes at the called point.
+// NOTE: Keep commented unless using. Part of this function always gets compiled in.
+int get_free_memory()
+{
+	extern int __heap_start, *__brkval;
+	uint16_t free;  // Up to 64k values.
+	free = (int) &free - (__brkval == 0 ? (int) &__heap_start : (int) __brkval);
+	return free;
+}
 
 // Extracts a floating point value from a string. The following code is based loosely on
 // the avr-libc strtod() function by Michael Stumpf and Dmitry Xmelkov and many freely
@@ -54,7 +68,7 @@ uint8_t read_float(char *line, uint8_t *char_counter, float *float_ptr)
   int8_t exp = 0;
   uint8_t ndigit = 0;
   bool isdecimal = false;
-  while(1) {
+  for(;;) {
     c -= '0';
     if (c <= 9) {
       ndigit++;

@@ -41,33 +41,7 @@ http://gammon.com.au/interrupts
 #include "steppers.h"
 #include "commands.h"
 
-void print_limits()
-{
-	int i;
-	print_pstr("LRT=");
-	uint8_t bs= limits_get_current_states()>>1;
-	for(i=0; i<3; ++i)
-	{
-		print_string((bs&1) ? "*" : "-");
-		bs>>=1;
-	}
-	print_pstr("  L=");
-
-	bs= limits_sticky_states>>1;
-	for(i=0; i<3; ++i)
-	{
-		print_string((bs&1) ? "*" : "-");
-		bs>>=1;
-	}
-	print_pstr("\n");
-}
-
-void print_tmp_stats()
-{
-	print_string(" ...pos="); print_integer(stepper_get_position(0));
-	print_string(" dir="); print_integer(stepper_get_direction(0));
-	print_string("\n"); delay_ms(500);
-}
+// ======================= Main =======================
 
 int main(void)
 {
@@ -78,50 +52,59 @@ int main(void)
 	stepper_init();
 	sei(); // Enable timers
 
-	serial_reset_read_buffer(); // Clear serial read buffer
-	print_pstr("Y:booted\n");
-
-	print_free_memory();
-
-	stepper_power(false);
-	delay_ms(1000);
-	stepper_power(true);
-
-	stepper_speed/= 1;
-
-	for(int pass= 0; pass<5; ++pass)
-	{
-		stepper_set_targets(-20.0);
-		while(steppers_are_moving()) if(limits_sticky_states) goto fail;
-
-		stepper_set_targets(0.0);
-		while(steppers_are_moving()) if(limits_sticky_states) goto fail;
-	}
-fail:
-	stepper_power(false);
-	if(limits_sticky_states)
-		print_string("Fatal on limits.");
-
-
-	/*
-	uint64_t m= millis();
-	uint64_t cycle_len=3000;
-	while(1)
-	{
-		command_collect();
-
-		uint64_t m2= millis();
-		if(m2-m>cycle_len)
-
-		{
-			serial_write('!');
-			m= m+cycle_len;
-		}
-	}
-*/
-
-
-	print_string("Done, please reset.");
+	//#define DEBUG_OSCILLO
+	#ifdef DEBUG_OSCILLO
 	for(;;)
+	{
+		stepper_set_targets(0, .05); while(steppers_are_moving());
+		stepper_set_targets(10, .1); while(steppers_are_moving());
+	}
+	#endif
+
+	print_pstr(";BOOT\n");
+	for(;;)
+	{
+		serial_reset_read_buffer(); // Clear serial read buffer
+		stepper_power(false);
+
+		print_pstr(";ram=");
+		print_integer(get_free_memory());
+		print_char('\n');
+		command_execute("?");
+
+		uint32_t c=0;
+		while(!nmi_reset)
+		{
+			if(command_collect())
+				command_execute();
+
+			if(++c==0)
+			{
+				serial_write(';');
+				serial_write('\n');
+			}
+		}
+
+		// Here on fatal/reset: retract the bed a little
+		cli();
+		nmi_reset= false;
+		stepper_init(); // clear all stepper movement
+		sei();
+
+		print_pstr(";RESET\n");
+		// set_origin(); // probably not a good idea
+		delay_ms(10);
+		Backup<bool> sam(steppers_relative_mode, true);
+		stepper_set_targets(10, 0.8);
+		delay_ms(10);
+		stepper_power(false);
+		delay_ms(10);
+
+		cli();
+		stepper_init();
+		sei();
+
+		nmi_reset= false;
+	}
 	return 0; // Never reached
 }

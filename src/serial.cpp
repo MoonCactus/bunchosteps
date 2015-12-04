@@ -104,7 +104,7 @@ uint8_t serial_read()
 {
 	uint8_t tail = serial_rx_buffer_tail; // Temporary serial_rx_buffer_tail (to optimize for volatile)
 	if (serial_rx_buffer_head == tail)
-		return 0;
+		return SERIAL_NO_DATA;
 
 	uint8_t data = serial_rx_buffer[tail];
 
@@ -116,11 +116,20 @@ uint8_t serial_read()
 	return data;
 }
 
+extern void stepper_power(bool);
 
 ISR(USART_RX_vect)
 {
 	uint8_t data = UDR0;
 	uint8_t next_head;
+
+	if(data==0x18) // control-X has immediate meaning (reset)
+	{
+		stepper_power(false);
+		nmi_reset= true;
+		return;
+	}
+	if(nmi_reset) return;
 
 	next_head = serial_rx_buffer_head + 1;
 	if (next_head == sizeof(serial_rx_buffer))
@@ -179,11 +188,14 @@ void print_string(const char *s)
 
 
 // Print a string stored in PGM-memory
-void _print_pstr(const char *s)
+void _print_pstr(const char *s, int slow_us)
 {
 	char c;
 	while ((c = pgm_read_byte_near(s++)))
+	{
 		serial_write(c);
+		if(slow_us) delay_us(slow_us);
+	}
 }
 
 // Prints an uint8 variable with base and number of desired digits.
@@ -310,15 +322,3 @@ void print_float(float n)
     print_float(n,2);
 }
 
-
-// Debug tool to print free memory in bytes at the called point.
-// NOTE: Keep commented unless using. Part of this function always gets compiled in.
-void print_free_memory()
-{
-	extern int __heap_start, *__brkval;
-	uint16_t free;  // Up to 64k values.
-	free = (int) &free - (__brkval == 0 ? (int) &__heap_start : (int) __brkval);
-	print_string("RAM:");
-	print_integer((int32_t)free);
-	print_char('\n');
-}

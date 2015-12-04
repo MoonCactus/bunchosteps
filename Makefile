@@ -31,7 +31,7 @@
 DEVICE     ?= atmega328p
 CLOCK      = 16000000
 PROGRAMMER ?= -c avrisp2 -P usb
-SOURCE    = main.c serial.c utils.c system.c steppers.c commands.c limits.c
+SOURCE    = main.cpp serial.cpp utils.cpp system.cpp steppers.cpp commands.cpp limits.cpp
 BUILDDIR = build
 SOURCEDIR = src
 # FUSES      = -U hfuse:w:0xd9:m -U lfuse:w:0x24:m
@@ -43,12 +43,12 @@ OPT        = -O3 # -Os may be better
 AVRDUDE = avrdude $(PROGRAMMER) -p $(DEVICE) -B 10 -F
 COMPILE = avr-g++ -Wall -Wextra $(OPT) -DF_CPU=$(CLOCK) -mmcu=$(DEVICE) -I. -ffunction-sections -fdata-sections
 
-OBJECTS = $(addprefix $(BUILDDIR)/,$(notdir $(SOURCE:.c=.o)))
+OBJECTS = $(addprefix $(BUILDDIR)/,$(notdir $(SOURCE:.cpp=.o)))
 
 # symbolic targets:
 all:	manysteps.hex
 
-$(BUILDDIR)/%.o: $(SOURCEDIR)/%.c
+$(BUILDDIR)/%.o: $(SOURCEDIR)/%.cpp
 	$(COMPILE) -MMD -MP -c $< -o $@
 
 .S.o:
@@ -93,7 +93,7 @@ disasm:	main.elf
 	avr-objdump -d $(BUILDDIR)/main.elf
 
 cpp:
-	$(COMPILE) -E $(SOURCEDIR)/main.c
+	$(COMPILE) -E $(SOURCEDIR)/main.cpp
 
 # include generated header dependencies
 -include $(BUILDDIR)/$(OBJECTS:.o=.d)

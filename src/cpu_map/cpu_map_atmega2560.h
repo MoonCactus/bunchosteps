@@ -59,6 +59,7 @@
 // Define stepper driver enable/disable output pin.
 #define STEPPERS_DISABLE_DDR   DDRB
 #define STEPPERS_DISABLE_PORT  PORTB
+#define STEPPERS_DISABLE_PIN   PINB
 #define STEPPERS_DISABLE_BIT   7 // MEGA2560 Digital Pin 13
 #define STEPPERS_DISABLE_MASK (1<<STEPPERS_DISABLE_BIT)
 

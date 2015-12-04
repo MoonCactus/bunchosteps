@@ -22,15 +22,17 @@
 #ifndef nuts_bolts_h
 #define nuts_bolts_h
 
+extern volatile bool nmi_reset;
+
 #define max(a,b) (((a) > (b)) ? (a) : (b))
 #define min(a,b) (((a) < (b)) ? (a) : (b))
 
 // Bit field and masking macros
 #define bit(n)      (1 << n)
 
-// #define bits_true_atomic(x,mask) {uint8_t sreg = SREG; cli(); (x) |= (mask); SREG = sreg; }
-// #define bits_false_atomic(x,mask) {uint8_t sreg = SREG; cli(); (x) &= ~(mask); SREG = sreg; }
-// #define bits_toggle_atomic(x,mask) {uint8_t sreg = SREG; cli(); (x) ^= (mask); SREG = sreg; }
+// #define bits_true_atomic(x,mask)   {uint8_t sreg = SREG; cli(); (x) |= (mask); SREG = sreg;  }
+// #define bits_false_atomic(x,mask)  {uint8_t sreg = SREG; cli(); (x) &= ~(mask); SREG = sreg; }
+// #define bits_toggle_atomic(x,mask) {uint8_t sreg = SREG; cli(); (x) ^= (mask); SREG = sreg;  }
 
 #define bset(x,n)   x |=  (1<<(n))
 #define bclr(x,n)   x &= ~(1<<(n))
@@ -38,15 +40,27 @@
 #define bisset(x,n) (((x) & (1<<(n))) != 0)
 #define bisclr(x,n) (((x) & (1<<(n))) == 0)
 
-// Just instanciate this class for temporary interrupt disable
-class StopInt
+// Just create an instance of this class to have temporary states for your variables (check your scope!)
+template<class T>
+class Backup
 {
 private:
-	uint8_t sreg = SREG;
+	T& variable_reference;
+	T initial_value;
 public:
-	StopInt()		{ cli(); sreg= SREG; }
-	~StopInt()		{ SREG = sreg; }
+	Backup(T& variable, T new_value_for_this_scope) : variable_reference(variable)
+	{
+		initial_value= variable_reference;
+		variable_reference= new_value_for_this_scope;
+	}
+	~Backup()
+	{
+		variable_reference= initial_value;
+	}
 };
+
+// Debug tool to get free memory in bytes at the called point. Not used otherwise.
+int get_free_memory();
 
 // Read a floating point value from a string. Line points to the input buffer, char_counter 
 // is the indexer pointing to the current character of the line, while float_ptr is 

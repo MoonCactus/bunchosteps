@@ -8,7 +8,7 @@
 #ifndef COMMANDS_H_
 #define COMMANDS_H_
 
-void command_execute(const char* cmd);
-void command_collect();
+bool command_collect();
+void command_execute(const char* cmd= NULL);
 
 #endif /* COMMANDS_H_ */
