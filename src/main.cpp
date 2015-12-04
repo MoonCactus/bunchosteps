@@ -65,7 +65,9 @@ int main(void)
 	for(;;)
 	{
 		serial_reset_read_buffer(); // Clear serial read buffer
+
 		stepper_power(false);
+		limits_enable();
 
 		print_pstr(";ram=");
 		print_integer(get_free_memory());
@@ -86,10 +88,8 @@ int main(void)
 		}
 
 		// Here on fatal/reset: retract the bed a little
-		cli();
 		nmi_reset= false;
-		stepper_init(); // clear all stepper movement
-		sei();
+		steppers_zero(); // clear all stepper movement
 
 		print_pstr(";RESET\n");
 		// set_origin(); // probably not a good idea
@@ -99,10 +99,6 @@ int main(void)
 		delay_ms(10);
 		stepper_power(false);
 		delay_ms(10);
-
-		cli();
-		stepper_init();
-		sei();
 
 		nmi_reset= false;
 	}

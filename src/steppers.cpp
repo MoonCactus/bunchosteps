@@ -31,6 +31,7 @@ D (digital pins 0 to 7)
 #include "serial.h"
 
 #define STEPS_PER_MM				400		// how many steps for 1 mm (depends on stepper and microstep sattings)
+#define ENFORCE_SHARED_LIMITS				// undefine to have the steppers check only their respective limit when moving (probably unsafe)
 
 #define BASE_TIMER_PERIOD			64		// how often the interrupt fires (clk * 8) -- at max speed, half a step can be made on each interrupt -- lowest possible
 
@@ -76,35 +77,60 @@ bool stepper_are_powered()
 
 void stepper_zero(uint8_t axis)
 {
+	uint8_t sreg= SREG;
+	cli();
 	volatile stepper_data* s = &steppers[axis];
 	s->source= 0;
 	s->position= 0;
 	s->target= 0;
 	s->ramp_length= 0;
 	s->fp_accu= 0;
+	SREG= sreg;
 }
 
-void stepper_init()
+void steppers_zero()
 {
 	for(uint8_t axis=0; axis<3; ++axis)
 		stepper_zero(axis);
+}
+
+
+void stepper_init()
+{
+	steppers_zero();
 	stepper_init_hw();
 }
 
 void stepper_set_targets(float mm, float speed_factor)
 {
+	// Better call only when idle else the movement will not be smooth
+	uint8_t sreg= SREG;
 	cli();
-	// Call this only when idle else the movement may not be smooth!
 	for(int axis=0; axis<3; ++axis)
 		stepper_set_target(axis, mm, speed_factor);
-	sei();
+	SREG= sreg;
+}
+
+// make sure steppers restart at slow speed (ie. mostly after a limit stop is leveraged)
+void steppers_zero_speed()
+{
+	uint8_t sreg= SREG;
+	cli();
+	for(int axis=0; axis<3; ++axis)
+	{
+		float target= float(steppers[axis].target) / (2 * STEPS_PER_MM);
+		stepper_set_target(axis, target, 0.5);
+	}
+	SREG= sreg;
 }
 
 void stepper_set_target(uint8_t axis, float mm, float speed_factor)
 {
+	uint8_t sreg= SREG;
+	cli();
+
 	int32_t target_in_absolute_steps= (int32_t)(mm * 2 * STEPS_PER_MM);
 
-	cli();
 
 	volatile stepper_data* s = &steppers[axis];
 
@@ -133,7 +159,7 @@ void stepper_set_target(uint8_t axis, float mm, float speed_factor)
 	if(steps_to_full_speed > half_distance) steps_to_full_speed= half_distance;
 	s->ramp_length= steps_to_full_speed;
 
-	sei();
+	SREG= sreg;
  }
 
 float stepper_get_position(uint8_t axis)
@@ -178,9 +204,13 @@ ISR(TIMER1_COMPA_vect)
 	{
 		volatile stepper_data* s = &steppers[stepper_index];
 
+#ifdef ENFORCE_SHARED_LIMITS
+		if(steppers_respect_endstop && sticky_limits)
+#else
 		if(steppers_respect_endstop && sticky_limit_is_hit(stepper_index))
+#endif
 		{
-			s->target= s->position; // no move, and stop here
+			// s->target= s->position; // no move, and stop here
 			return;
 		}
 

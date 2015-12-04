@@ -12,7 +12,7 @@
 #include "serial.h"
 #include "steppers.h"
 
-#define HOME_SEEK_PREPARE_MM	5.0		// max expected bed skew before homing (will go down by this number)
+#define HOME_SEEK_PREPARE_MM	8.0		// max expected bed skew before homing (will go down by this number)
 #define HOME_SEEK_UP_MM			400.0	// bed may start completely at the bottom
 #define HOME_SEEK_COARSE_RATIO	0.4		// how fast to seek (first pass only)
 #define LEVEL_SEEK_UP_MM		(2*HOME_SEEK_PREPARE_MM)
@@ -126,9 +126,14 @@ void cmd_show_status()
 	uint8_t sl= sticky_limits;
 
 	if(stepper_are_powered())
-		info("enabled");
+		info("offline");
 	else
-		info("disabled");
+		info("online");
+
+	if(limits_are_enforced())
+		info("limited");
+	else
+		info("unlimited");
 
 	print_pstr(";limits=");
 	print_unsigned_int8(sl,2,3);
@@ -151,6 +156,7 @@ void cmd_show_status()
 bool cmd_home_center()
 {
 	TEMP_RELATIVE_MODE;
+	limits_enable();
 
 	// Pre-down all bed
 	info("h/down");
@@ -195,12 +201,11 @@ bool cmd_home_center()
 			error("h/unstick");
 		}
 		info("h/origin");
-		cmd_show_status(); // debug
+		// cmd_show_status(); // debug
 		set_origin();
 		delay_ms(100);
 		sticky_limits= 0; // sometimes the bed is slightly elastic
 	}
-	success("h");
 	return true;
 }
 
@@ -210,6 +215,7 @@ bool cmd_home_center()
 bool cmd_home_axis(uint8_t axis)
 {
 	TEMP_RELATIVE_MODE;
+	limits_enable();
 
 	// Pre-down all bed as it may be skewed
 	info("hn/down");
@@ -255,17 +261,13 @@ bool cmd_home_axis(uint8_t axis)
 			error("h/unstick");
 		}
 		info("hn/origin");
-		cmd_show_status(); // debug
+		// cmd_show_status(); // debug
 		set_origin_single(axis);
 		delay_ms(100);
 		sticky_limits &= ~(1<<(axis+1)); // sometimes the bed is slightly elastic
 	}
 
 	// success
-	print_pstr("$h");
-	print_integer(axis);
-	print_string("\n");
-
 	return true;
 }
 
@@ -340,37 +342,43 @@ bool run(const char* cmd/*= NULL*/)
 	if(cmd0=='?')
 	{
 		print_pstr_slow(";help:\n\
-;S - status\n\
-;P<0|1> - power\n\
-;H - main home\n\
-;h<0-2> - calibrate\n\
-;R<ratio> - speed\n\
-;C - clear limits\n\
-;L<0|1> - use limits\n\
-;M<R|A> - relative/absolute mode\n\
-;G<height> - move bed\n");
+;! - status\n\
+;p<0|1> - power\n\
+;s<ratio> - speed\n\
+;m<R|A> - relative/absolute mode\n\
+;l<0|1> - respect limits\n\
+;o - off limits\n\
+;h - main home\n\
+;z - zero origin\n\
+;c<0-2> - calibrate\n\
+;g<height> - move bed\n");
 		return true;
 	}
 
 	// ----------------------------------------------------------------------------------------
-	if(cmd0=='S' && !cmd1) // S - show status
+	if(cmd0=='!') // ! - show status
 	{
+		if(cmd1) return false;
 		cmd_show_status();
 		return true;
 	}
 
 	// ---------------------------------------------------------------------------------------- config
 
-	if(cmd0=='P' && !cmd1) // P<0|1> - stepper power
+	if(cmd0=='p') // p<0|1> - stepper power
 	{
-		if(cmd1=='0')	{ stepper_power(false); return true; }
-		if(cmd1=='1')	{ stepper_power(true); return true; }
+		if(cmd1 && !cmd[2])
+		{
+			if(cmd1=='0')	{ stepper_power(false); return true; }
+			if(cmd1=='1')	{ stepper_power(true); return true; }
+		}
 		info("0|1?");
 		return false;
 	}
 
-	if(cmd0=='R' && cmd1) // R<ratio> - speed ratio
+	if(cmd0=='s') // s<ratio> - speed ratio
 	{
+		if(!cmd1) return false;
 		float pos;
 		const char* p= string_to_float(cmd+1, &pos);
 		if(*p)
@@ -382,31 +390,39 @@ bool run(const char* cmd/*= NULL*/)
 		return true;
 	}
 
-	if(cmd0=='L' && !cmd1) // L<0|1> - enable/disable limits interruptions
+	if(cmd0=='m') // m<R|A> - relative or absolute mode
 	{
-		if(cmd1=='0')	{ limits_disable(); return true; }
-		if(cmd1=='1')	{ limits_enable(); return true; }
-		info("0|1?");
-		return false;
-	}
-
-	if(cmd0=='M' && !cmd1) // M<R|A> - relative or absolute mode
-	{
-		if(cmd1=='R')	{ steppers_relative_mode= true; return true; }
-		if(cmd1=='A')	{ steppers_relative_mode= false; return true; }
+		if(cmd1 && !cmd[2])
+		{
+			if(cmd1=='r')	{ steppers_relative_mode= true; return true; }
+			if(cmd1=='a')	{ steppers_relative_mode= false; return true; }
+		}
 		info("R|A?");
 		return false;
 	}
 
+	if(cmd0=='l') // l<0|1> - enable/disable limits interruptions
+	{
+		if(cmd1 && !cmd[2])
+		{
+			if(cmd1=='0')	{ limits_disable(); return true; }
+			if(cmd1=='1')	{ limits_enable(); return true; }
+		}
+		info("0|1?");
+		return false;
+	}
+
+
 	// ---------------------------------------------------------------------------------------- movement: setup
 
-	if(cmd0=='H' && !cmd1) // H - homing
+	if(cmd0=='h') // h - homing
 	{
+		if(cmd1) return false;
 		stepper_power(true); // one way to boot up the steppers
 		return cmd_home_center();
 	}
 
-	if(cmd0=='h') // h<0-2> - calibrate
+	if(cmd0=='c') // c<0-2> - calibrate
 	{
 		uint8_t axis= (cmd1-'0');
 		if(axis>2)
@@ -419,15 +435,23 @@ bool run(const char* cmd/*= NULL*/)
 		return cmd_home_axis(axis);
 	}
 
-	if(cmd0=='C' && !cmd1) // C - get down, out of the limits
+	if(cmd0=='o') // x - get down, out of the limits
 	{
+		if(cmd1) return false;
 		if(!enabled()) return false;
 		return(down_detach());
 	}
 
 	// ---------------------------------------------------------------------------------------- movement: bed height
 
-	if(cmd0=='G') // G<mm> : move to a position
+	if(cmd0=='z') // z - zero the origin here
+	{
+		if(cmd1) return false;
+		set_origin();
+		return true;
+	}
+
+	if(cmd0=='g') // G<mm> : move to a position
 	{
 		if(!enabled()) return false;
 		float pos;
@@ -438,13 +462,11 @@ bool run(const char* cmd/*= NULL*/)
 			return false;
 		}
 
-		print_char(';');
-		print_float(pos);
-		print_char('\n');
 		if(move_modal(pos, speed_factor))
 			return true;
 
 		info("limit_hit");
+		steppers_zero_speed(); // we will restart at slow speed if "l0" is send (i.e. do not enforce limits)
 		return false;
 	}
 
@@ -463,7 +485,7 @@ void command_execute(const char* cmd/*= NULL*/)
 		cmd= cmd_buf;
 
 	// Echo input command
-	print_pstr("!");
+	print_pstr(">");
 	print_string(cmd);
 	print_pstr("\n");
 

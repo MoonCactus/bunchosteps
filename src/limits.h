@@ -13,6 +13,7 @@ extern volatile uint8_t sticky_limits;
 void limits_enable();
 void limits_disable();
 void limits_init();
+bool limits_are_enforced();
 uint8_t limits_get_rt_states();
 bool sticky_limit_is_hit(int axis);
 

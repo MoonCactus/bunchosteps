@@ -22,6 +22,7 @@ void limits_disable()
 {
 	PCMSK0 &= ~0b00001110;  // Disable specific pins of the Pin Change Interrupt
 	PCICR  &= ~(1 << PCIE0);  // Disable Pin Change Interrupt
+	sticky_limits= 0;
 }
 
 void limits_init()
@@ -29,6 +30,11 @@ void limits_init()
 	DDRB  &= ~0b00001110; // Set as input pins
 	PORTB |=  0b00001110;  // Enable internal pull-up resistors. Normal high operation.
 	limits_enable();
+}
+
+bool limits_are_enforced()
+{
+	return (PCICR & (1 << PCIE0));
 }
 
 uint8_t limits_get_rt_states()
