@@ -151,6 +151,11 @@ void cmd_show_status()
 		print_float(stepper_get_position(axis));
 		print_pstr("\n");
 	}
+
+	print_pstr(";ram=");
+	print_integer(get_free_memory());
+	print_char('\n');
+
 }
 
 bool cmd_home_center()
@@ -483,6 +488,8 @@ void command_execute(const char* cmd/*= NULL*/)
 {
 	if(!cmd)
 		cmd= cmd_buf;
+	if(!*cmd || *cmd=='\n' || *cmd=='\r')
+		return; // keep quiet on these
 
 	// Echo input command
 	print_pstr(">");

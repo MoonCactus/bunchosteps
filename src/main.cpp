@@ -69,10 +69,7 @@ int main(void)
 		stepper_power(false);
 		limits_enable();
 
-		print_pstr(";ram=");
-		print_integer(get_free_memory());
-		print_char('\n');
-		command_execute("?");
+		// print_pstr(";ram=");print_integer(get_free_memory());print_char('\n');
 
 		uint32_t c=0;
 		while(!nmi_reset)
