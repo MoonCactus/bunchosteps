@@ -23,8 +23,8 @@ extern volatile int32_t stepper_speed;
 extern volatile stepper_data steppers[3];
 extern volatile bool steppers_respect_endstop;
 
-#define DIRECTION_ALL_ON()   PORTD |=  (3<<5)
-#define DIRECTION_ALL_OFF()  PORTD &= ~(3<<5)
+#define DIRECTION_ALL_ON()   PORTD |=  (7<<5)
+#define DIRECTION_ALL_OFF()  PORTD &= ~(7<<5)
 #define STEPPER_ALL_HALF_STEP()  PORTD ^=  (7<<2)
 
 #define STEPPER_HALF_STEP(axis)  PORTD ^=  (1<<(axis+2))

@@ -26,10 +26,10 @@
 void external_init() 
 {
 	// Start, reset, feed hold
-	CONTROL_DDR &= ~(CONTROL_MASK); // Configure as input pins
-	CONTROL_PORT |= CONTROL_MASK;   // Enable internal pull-up resistors. Normal high operation.
-	CONTROL_PCMSK |= CONTROL_MASK;  // Enable specific pins of the Pin Change Interrupt
-	PCICR |= (1 << CONTROL_INT);    // Enable Pin Change Interrupt
+	CONTROL_DDR   &= ~(CONTROL_MASK); 		// Configure as input pins
+	CONTROL_PORT  |= CONTROL_MASK;  		// Enable internal pull-up resistors. Normal high operation.
+	CONTROL_PCMSK |= CONTROL_MASK;  		// Enable specific pins of the Pin Change Interrupt
+	PCICR         |= (1 << CONTROL_INT);    // Enable Pin Change Interrupt TODO: we may only need raising edge, not change!!
 }
 
 // Pin change interrupt for pin-out commands, i.e. cycle start, feed hold, and reset. Sets
@@ -39,18 +39,18 @@ void external_init()
 ISR(CONTROL_INT_vect) 
 {
 	uint8_t pin = (CONTROL_PIN & CONTROL_MASK);
-	#ifndef INVERT_ALL_CONTROL_PINS
+	#ifdef CONTROL_INVERT_MASK
 		pin ^= CONTROL_INVERT_MASK;
 	#endif
 	// Enter only if any CONTROL pin is detected as active.
 	if (pin)
 	{
-		// The master send step/dir pulses
+		// The master sent a step pulse
 		if(pin & (1<<EXT_STEP_BIT))
 		{
 			if(external_mode) // only in "external mode" ($E, vs. default $C configuration mode)
 			{
-				if(CONTROL_PIN & EXT_DIR_BIT)
+				if(CONTROL_PIN & (1<<EXT_DIR_BIT))
 					DIRECTION_ALL_ON();
 				else
 					DIRECTION_ALL_OFF();
@@ -59,13 +59,5 @@ ISR(CONTROL_INT_vect)
 				STEPPER_ALL_HALF_STEP();
 			}
 		}
-		/*
-			if (bit_istrue(pin,bit(RESET_BIT)))
-				{mc_reset();}
-			else if (bit_istrue(pin,bit(CYCLE_START_BIT)))
-				bit_true(sys_rt_exec_state, EXEC_CYCLE_START);
-			else if (bit_istrue(pin,bit(FEED_HOLD_BIT)))
-				bit_true(sys_rt_exec_state, EXEC_FEED_HOLD);
-		*/
 	}
 }
