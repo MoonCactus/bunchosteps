@@ -31,7 +31,7 @@
 DEVICE     ?= atmega328p
 CLOCK      = 16000000
 PROGRAMMER ?= -c avrisp2 -P usb
-SOURCE    = main.cpp serial.cpp utils.cpp system.cpp steppers.cpp commands.cpp limits.cpp
+SOURCE    = main.cpp serial.cpp utils.cpp external.cpp steppers.cpp commands.cpp limits.cpp
 BUILDDIR = build
 SOURCEDIR = src
 # FUSES      = -U hfuse:w:0xd9:m -U lfuse:w:0x24:m

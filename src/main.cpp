@@ -40,6 +40,7 @@ http://gammon.com.au/interrupts
 #include "limits.h"
 #include "steppers.h"
 #include "commands.h"
+#include "external.h"
 
 // ======================= Main =======================
 
@@ -50,6 +51,7 @@ int main(void)
 	serial_init();   // Setup serial baud rate and interrupts
 	limits_init();
 	stepper_init();
+	external_init();
 	sei(); // Enable timers
 
 	//#define DEBUG_OSCILLO
@@ -60,6 +62,8 @@ int main(void)
 		stepper_set_targets(10, .1); while(steppers_are_moving());
 	}
 	#endif
+
+	delay_ms(1000); // 1 second delay so that the master may boot at its pace first...
 
 	print_pstr(";BOOT\n");
 	for(;;)

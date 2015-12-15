@@ -12,15 +12,15 @@
 #include "serial.h"
 #include "steppers.h"
 
-#define HOME_SEEK_PREPARE_MM	8.0		// max expected bed skew before homing (will go down by this number)
 #define HOME_SEEK_UP_MM			400.0	// bed may start completely at the bottom
+#define LEVEL_SEEK_UP_MM		8		// max travel up when looking for an axis home
 #define HOME_SEEK_COARSE_RATIO	0.4		// how fast to seek (first pass only)
-#define LEVEL_SEEK_UP_MM		(2*HOME_SEEK_PREPARE_MM)
 
 // Temporary modes: make sure to check your scope for these automatic status/instances!
 #define TEMP_RELATIVE_MODE		Backup<bool> sam(steppers_relative_mode, true)
 #define TEMP_IGNORE_LIMITS 		Backup<volatile bool> sre(steppers_respect_endstop,false);
 
+/*extern*/ uint8_t external_mode= 0;
 
 static char cmd_buf[32];
 static uint8_t cmd_len= 0;
@@ -73,28 +73,23 @@ bool detect_up_axis(uint8_t axis, float speed)
 	sticky_limits= 0;
 	move_modal_axis(axis, -LEVEL_SEEK_UP_MM, speed); // slow upwards. We're expecting to trigger at least one end stop
 	delay_ms(10);
-	return(sticky_limits!=0);
+	return((sticky_limits&(1<<axis))!=0); // we want this axis to hit the limit
 }
 
+/**
+ * Move bed down until sensors are no more activated.
+ * The usual context is to call this *immediately* after homing up and before setting home with z
+ */
 bool down_detach()
 {
 	// TODO: change movement to be short sequences of [down/up/down] to avoid sensor saturation
 	TEMP_IGNORE_LIMITS; // else no movement will be done
 	TEMP_RELATIVE_MODE;
-	uint8_t trials= 0;
-	while(++trials<10)
-	{
-		sticky_limits= 0;
-		bool rt;
-		stepper_set_targets(1, 0.2); // asynchronous call: down slowly, just to detach the bed from the tool head
-		while((rt=limits_get_rt_states()) && steppers_are_moving() && !nmi_reset);
-		stepper_set_targets(0,1); // stop all movement asap (we are in relative mode)
-		if(!rt) break;
-		delay_ms(10);
-	}
-	if(trials>=5) return false;
 	sticky_limits= 0;
-	return true;
+	if(limits_get_rt_states()) stepper_set_targets(5, 0.01); // very slow asynchronous call: just to detach the bed from the tool head
+	while(limits_get_rt_states() && steppers_are_moving() && !nmi_reset);
+	stepper_set_targets(0, 0.5); // stop all movement asap (we are in relative mode and we ignore sticky limits)
+	return !limits_get_rt_states();
 }
 
 bool down_detach_single(uint8_t axis)
@@ -102,20 +97,13 @@ bool down_detach_single(uint8_t axis)
 	// TODO: change movement to be short sequences of [down/up/down] to avoid sensor saturation
 	TEMP_IGNORE_LIMITS; // else no movement will be done
 	TEMP_RELATIVE_MODE;
-	uint8_t trials= 0;
-	while(++trials<10)
-	{
-		sticky_limits= 0;
-		bool rt;
-		stepper_set_target(axis, 1, 0.2); // asynchronous call: down slowly, just to detach the bed from the tool head
-		while((rt=limits_get_rt_states()) && stepper_is_moving(axis) && !nmi_reset);
-		stepper_set_target(axis, 0,1); // stop all movement asap (we are in relative mode)
-		if(!rt) break;
-		delay_ms(10);
-	}
-	if(trials>=5) return false;
 	sticky_limits &= ~(1<<axis);
-	return true;
+
+	if(limits_get_rt_states()&(1<<axis)) stepper_set_target(axis, 5, 0.01); // asynchronous call: down slowly, just to detach the bed from the tool head
+	while((limits_get_rt_states()&(1<<axis)) && stepper_is_moving(axis) && !nmi_reset);
+	stepper_set_target(axis,0, 0.5); // stop all movement asap (we are in relative mode and we ignore sticky limits)
+
+	return !(limits_get_rt_states() & (1<<axis));
 }
 
 // ======================= All 3 axis =======================
@@ -126,9 +114,14 @@ void cmd_show_status()
 	uint8_t sl= sticky_limits;
 
 	if(stepper_are_powered())
-		info("offline");
+		info("powered");
 	else
-		info("online");
+		info("off");
+
+	if(external_mode)
+		info("external");
+	else
+		info("calibration");
 
 	if(limits_are_enforced())
 		info("limited");
@@ -158,18 +151,12 @@ void cmd_show_status()
 
 }
 
+/**
+ * 3-way simultaneaous homing (standard homing after calibration)
+ */
 bool cmd_home_center()
 {
 	TEMP_RELATIVE_MODE;
-	limits_enable();
-
-	// Pre-down all bed
-	info("h/down");
-	{
-		TEMP_IGNORE_LIMITS;
-		sticky_limits= 0;
-		move_modal(HOME_SEEK_PREPARE_MM, 1);
-	}
 
 	// Coarse upwards (first home seek at medium speed)
 	{
@@ -180,7 +167,7 @@ bool cmd_home_center()
 			return error("hn/upwards");
 		}
 		set_origin();
-		delay_ms(100);
+		delay_ms(10);
 	}
 
 	// Slightly down again
@@ -193,7 +180,7 @@ bool cmd_home_center()
 	// Fine upwards and set origin again
 	{
 		info("h/fine");
-		detect_up(0.1);
+		detect_up(0.05);
 		set_origin();
 	}
 
@@ -220,24 +207,14 @@ bool cmd_home_center()
 bool cmd_home_axis(uint8_t axis)
 {
 	TEMP_RELATIVE_MODE;
-	limits_enable();
-
-	// Pre-down all bed as it may be skewed
-	info("hn/down");
-	{
-		TEMP_IGNORE_LIMITS;
-		sticky_limits= 0;
-		//move_modal(HOME_SEEK_PREPARE_MM, 1); // all three Z axes?
-		move_modal_axis(axis,HOME_SEEK_PREPARE_MM,1);
-	}
 
 	// Coarse upwards (first home seek at medium speed)
 	{
 		info("hn/coarse");
-		if(!detect_up_axis(axis, 0.25))
+		if(!detect_up_axis(axis, HOME_SEEK_COARSE_RATIO))
 		{
 			nmi_reset= true; // hard failure: homing is vital
-			return error("hn/upwards");
+			return error("hn/coarse");
 		}
 		set_origin_single(axis);
 		delay_ms(100);
@@ -253,13 +230,14 @@ bool cmd_home_axis(uint8_t axis)
 	// Fine upwards and set origin again
 	{
 		info("hn/fine");
-		detect_up_axis(axis, 0.1);
+		if(!detect_up_axis(axis, 0.05))
+			return error("hn/fine");
 		set_origin_single(axis);
 	}
 
 	// Down until sensors detect nothing anymore
 	{
-		info("hn/back");
+		info("hn/backd");
 		if(!down_detach_single(axis))
 		{
 			nmi_reset= true; // hard failure: homing is vital
@@ -314,10 +292,13 @@ bool command_collect()
 const char* string_to_float(const char* p, float* v)
 {
 	float value= 0;
+	bool neg= false;
+	if(*p=='-') { neg=true; ++p; }
 	while(*p>='0' && *p<='9')
 		value= (value*10) + (*(p++)-'0');
 	if(*p=='.')
 	{
+		++p;
 		float k= 0.1;
 		while(*p>='0' && *p<='9')
 		{
@@ -325,6 +306,7 @@ const char* string_to_float(const char* p, float* v)
 			k/= 10;
 		}
 	}
+	if(neg) value= -value;
 	*v= value;
 	return p;
 }
@@ -348,13 +330,16 @@ bool run(const char* cmd/*= NULL*/)
 	{
 		print_pstr_slow(";help:\n\
 ;! - status\n\
+;$<C|E> - config vs. external mode\n\
+;s<0-2> - settle here\n\
 ;p<0|1> - power\n\
-;s<ratio> - speed\n\
-;m<R|A> - relative/absolute mode\n\
+;s<ratio> - speed ratio\n\
+;m<R|A> - relative vs. absolute mode\n\
+;x<0-2> - clear limits\n\
 ;l<0|1> - respect limits\n\
-;o - off limits\n\
+;o<0-2> - off limits\n\
 ;h - main home\n\
-;z - zero origin\n\
+;z<0-2> - zero origin\n\
 ;c<0-2> - calibrate\n\
 ;g<height> - move bed\n");
 		return true;
@@ -368,7 +353,31 @@ bool run(const char* cmd/*= NULL*/)
 		return true;
 	}
 
+	if(cmd0=='s') // s -settle here (stop movement)
+	{
+		if(!cmd1)
+		{
+			steppers_settle_here();
+			return true;
+		}
+		uint8_t axis= (cmd1-'0');
+		if(axis>2) { info("0-N?"); return false; }
+		stepper_settle_here(axis);
+		return true;
+	}
+
 	// ---------------------------------------------------------------------------------------- config
+
+	if(cmd0=='$') // $<C|E> - configuration/external drive. Transparent just transmits dir/steps from input pins.
+	{
+		if(cmd1 && !cmd[2])
+		{
+			if(cmd1=='C')	{ external_mode= 0; return true; }
+			if(cmd1=='E')	{ external_mode= 1; return true; }
+		}
+		info("0|1?");
+		return false;
+	}
 
 	if(cmd0=='p') // p<0|1> - stepper power
 	{
@@ -381,7 +390,7 @@ bool run(const char* cmd/*= NULL*/)
 		return false;
 	}
 
-	if(cmd0=='s') // s<ratio> - speed ratio
+	if(cmd0=='r') // r<ratio> - speed ratio
 	{
 		if(!cmd1) return false;
 		float pos;
@@ -430,33 +439,52 @@ bool run(const char* cmd/*= NULL*/)
 	if(cmd0=='c') // c<0-2> - calibrate
 	{
 		uint8_t axis= (cmd1-'0');
-		if(axis>2)
-		{
-			info("0-N?");
-			return false;
-		}
-
+		if(axis>2) { info("0-N?"); return false; }
 		stepper_power(true); // one way to boot up the steppers
 		return cmd_home_axis(axis);
 	}
 
-	if(cmd0=='o') // x - get down, out of the limits
+	if(cmd0=='x') // x or x<0-2> - clear sticky limits and resume movement if any (dangerous)
 	{
-		if(cmd1) return false;
+		steppers_zero_speed(); // make sure steppers restart at low speed
+		if(!cmd1)
+		{
+			sticky_limits= 0;
+			return true;
+		}
+		uint8_t axis= (cmd1-'0');
+		if(axis>2) { info("0-N?"); return false; }
+		sticky_limits &= ~(1<<axis);
+		return true;
+	}
+
+	if(cmd0=='o') // o or o<0-2> - get down, out of the limits
+	{
 		if(!enabled()) return false;
-		return(down_detach());
+		if(!cmd1)
+			return(down_detach());
+		uint8_t axis= (cmd1-'0');
+		if(axis>2) { info("0-N?"); return false; }
+		return down_detach_single(axis);
+
 	}
 
 	// ---------------------------------------------------------------------------------------- movement: bed height
 
-	if(cmd0=='z') // z - zero the origin here
+	if(cmd0=='z') // z or z<0-2> - zero the origin here
 	{
-		if(cmd1) return false;
-		set_origin();
+		if(!cmd1)
+		{
+			set_origin();
+			return true;
+		}
+		uint8_t axis= (cmd1-'0');
+		if(axis>2) { info("0-N?"); return false; }
+		set_origin_single(axis);
 		return true;
 	}
 
-	if(cmd0=='g') // G<mm> : move to a position
+	if(cmd0=='g') // g<mm> : move to a position
 	{
 		if(!enabled()) return false;
 		float pos;

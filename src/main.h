@@ -33,4 +33,6 @@
 
 #include "utils.h"
 
+extern uint8_t external_mode;
+
 #endif /* MAIN_H_ */

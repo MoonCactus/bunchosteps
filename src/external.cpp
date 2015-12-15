@@ -19,9 +19,11 @@
 */
 
 #include "main.h"
+#include "steppers.h"
+#include "serial.h"
 
 
-void system_init() 
+void external_init() 
 {
 	// Start, reset, feed hold
 	CONTROL_DDR &= ~(CONTROL_MASK); // Configure as input pins
@@ -43,18 +45,27 @@ ISR(CONTROL_INT_vect)
 	// Enter only if any CONTROL pin is detected as active.
 	if (pin)
 	{
+		// The master send step/dir pulses
+		if(pin & (1<<EXT_STEP_BIT))
+		{
+			if(external_mode) // only in "external mode" ($E, vs. default $C configuration mode)
+			{
+				if(CONTROL_PIN & EXT_DIR_BIT)
+					DIRECTION_ALL_ON();
+				else
+					DIRECTION_ALL_OFF();
+				STEPPER_ALL_HALF_STEP(); // pulse lengths, see https://www.pololu.com/product/2133
+				delay_us(2); // 1.9us for DRV8825 and 1us for A4988
+				STEPPER_ALL_HALF_STEP();
+			}
+		}
 		/*
-		if (bit_istrue(pin,bit(RESET_BIT)))
-		{mc_reset();}
-		else if (bit_istrue(pin,bit(CYCLE_START_BIT)))
-		bit_true(sys_rt_exec_state, EXEC_CYCLE_START);
-		#ifndef ENABLE_SAFETY_DOOR_INPUT_PIN
-		else if (bit_istrue(pin,bit(FEED_HOLD_BIT)))
-		bit_true(sys_rt_exec_state, EXEC_FEED_HOLD);
-		#else
-		else if (bit_istrue(pin,bit(SAFETY_DOOR_BIT)))
-		bit_true(sys_rt_exec_state, EXEC_SAFETY_DOOR);
-		#endif
+			if (bit_istrue(pin,bit(RESET_BIT)))
+				{mc_reset();}
+			else if (bit_istrue(pin,bit(CYCLE_START_BIT)))
+				bit_true(sys_rt_exec_state, EXEC_CYCLE_START);
+			else if (bit_istrue(pin,bit(FEED_HOLD_BIT)))
+				bit_true(sys_rt_exec_state, EXEC_FEED_HOLD);
 		*/
 	}
 }

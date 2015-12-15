@@ -23,17 +23,26 @@ extern volatile int32_t stepper_speed;
 extern volatile stepper_data steppers[3];
 extern volatile bool steppers_respect_endstop;
 
+#define DIRECTION_ALL_ON()   PORTD |=  (3<<5)
+#define DIRECTION_ALL_OFF()  PORTD &= ~(3<<5)
+#define STEPPER_ALL_HALF_STEP()  PORTD ^=  (7<<2)
+
+#define STEPPER_HALF_STEP(axis)  PORTD ^=  (1<<(axis+2))
+
 void stepper_init();
 
 void stepper_zero(uint8_t axis);
 void steppers_zero();
+
+void stepper_settle_here(uint8_t axis);
+void steppers_settle_here();
 
 void stepper_power(bool s);
 bool stepper_are_powered();
 void stepper_set_targets(float mm, float speed_factor);
 void steppers_zero_speed();
 
-void stepper_set_target(uint8_t axis, float mm, float speed_factor);
+bool stepper_set_target(uint8_t axis, float mm, float speed_factor);
 bool stepper_is_moving(uint8_t axis);
 bool steppers_are_moving();
 

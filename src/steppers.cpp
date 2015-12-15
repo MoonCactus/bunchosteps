@@ -90,10 +90,30 @@ void stepper_zero(uint8_t axis)
 
 void steppers_zero()
 {
+	uint8_t sreg= SREG;
+	cli();
 	for(uint8_t axis=0; axis<3; ++axis)
 		stepper_zero(axis);
+	SREG= sreg;
 }
 
+void stepper_settle_here(uint8_t axis)
+{
+	uint8_t sreg= SREG;
+	cli();
+	volatile stepper_data* s = &steppers[axis];
+	s->target= s->position;
+	SREG= sreg;
+}
+
+void steppers_settle_here()
+{
+	uint8_t sreg= SREG;
+	cli();
+	for(uint8_t axis=0; axis<3; ++axis)
+		stepper_zero(axis);
+	SREG= sreg;
+}
 
 void stepper_init()
 {
@@ -124,8 +144,10 @@ void steppers_zero_speed()
 	SREG= sreg;
 }
 
-void stepper_set_target(uint8_t axis, float mm, float speed_factor)
+bool stepper_set_target(uint8_t axis, float mm, float speed_factor)
 {
+	if(external_mode) return false;
+
 	uint8_t sreg= SREG;
 	cli();
 
@@ -160,6 +182,7 @@ void stepper_set_target(uint8_t axis, float mm, float speed_factor)
 	s->ramp_length= steps_to_full_speed;
 
 	SREG= sreg;
+	return true;
  }
 
 float stepper_get_position(uint8_t axis)
@@ -200,6 +223,7 @@ bool steppers_are_moving()
 ISR(TIMER1_COMPA_vect)
 {
 	if(nmi_reset) return;
+	if(external_mode) return; // steppers are commanded directly by the master
 	for(uint8_t stepper_index=0;stepper_index<3;++stepper_index)
 	{
 		volatile stepper_data* s = &steppers[stepper_index];
@@ -249,7 +273,7 @@ ISR(TIMER1_COMPA_vect)
 				++position;
 			else
 				--position;
-			PORTD ^=  1<<(stepper_index+2);	// half a step
+			STEPPER_HALF_STEP(stepper_index);
 			accu-= FIXED_POINT_OVF;
 		}
 		s->fp_accu= accu;
