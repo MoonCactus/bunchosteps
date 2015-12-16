@@ -81,7 +81,14 @@
   #define SPINDLE_DIRECTION_PORT  PORTB
   #define SPINDLE_DIRECTION_BIT   5  // Uno Digital Pin 13 (NOTE: D13 can't be pulled-high input due to LED.)
 #endif
-  
+
+// Define endstop output port
+// NOTE: Uno analog pins 4 and 5 are reserved for an i2c interface, and may be installed at
+// a later date if flash and memory space allows.
+#define EXT_ENDSTOP_DDR   DDRC
+#define EXT_ENDSTOP_PORT  PORTC
+#define EXT_ENDSTOP_BIT   3  // Uno Analog Pin 3
+
 // Define user-control controls (cycle start, reset, feed hold) input pins.
 // NOTE: All CONTROLs pins must be on the same port and not on a port with other input pins (limits).
 #define CONTROL_DDR       DDRC

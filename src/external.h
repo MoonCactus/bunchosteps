@@ -9,5 +9,6 @@
 #define EXTERNAL_H_
 
 void external_init();
+void external_endstop(bool state);
 
 #endif /* EXTERNAL_H_ */

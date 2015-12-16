@@ -20,8 +20,9 @@
 
 #include "main.h"
 #include "steppers.h"
-#include "serial.h"
+#include "external.h"
 
+#include "serial.h"
 
 void external_init() 
 {
@@ -30,6 +31,18 @@ void external_init()
 	CONTROL_PORT  |= CONTROL_MASK;  		// Enable internal pull-up resistors. Normal high operation.
 	CONTROL_PCMSK |= CONTROL_MASK;  		// Enable specific pins of the Pin Change Interrupt
 	PCICR         |= (1 << CONTROL_INT);    // Enable Pin Change Interrupt TODO: we may only need raising edge, not change!!
+
+	EXT_ENDSTOP_DDR |= (1 << EXT_ENDSTOP_BIT);
+	external_endstop(false);
+}
+
+void external_endstop(bool state)
+{
+	// Marlin: endstop is triggered with a low state
+	if(state)
+		EXT_ENDSTOP_PORT &= ~(1 << EXT_ENDSTOP_BIT); // clear
+	else
+		EXT_ENDSTOP_PORT |= (1 << EXT_ENDSTOP_BIT); // set
 }
 
 // Pin change interrupt for pin-out commands, i.e. cycle start, feed hold, and reset. Sets
@@ -42,8 +55,11 @@ ISR(CONTROL_INT_vect)
 	#ifdef CONTROL_INVERT_MASK
 		pin ^= CONTROL_INVERT_MASK;
 	#endif
+
+		serial_write( (pin & (1<<EXT_STEP_BIT)) ? 1 : 0 );
+
 	// Enter only if any CONTROL pin is detected as active.
-	if (pin)
+	if(pin)
 	{
 		// The master sent a step pulse
 		if(pin & (1<<EXT_STEP_BIT))

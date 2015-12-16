@@ -7,6 +7,7 @@
 
 #include "main.h"
 #include "limits.h"
+#include "external.h"
 
 volatile uint8_t sticky_limits= 0;
 
@@ -50,5 +51,7 @@ bool sticky_limit_is_hit(int axis)
 
 ISR(PCINT0_vect) // DEFAULT: Limit pin change interrupt process.
 {
-	sticky_limits|= limits_get_rt_states();
+	uint8_t s= limits_get_rt_states();
+	sticky_limits|= s;
+	external_endstop(s!=0); // echo the endstop state to the master
 }

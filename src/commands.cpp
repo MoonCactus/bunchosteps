@@ -13,11 +13,14 @@
 #include "steppers.h"
 
 #define HOME_SEEK_UP_MM			400.0	// bed may start completely at the bottom
-#define LEVEL_SEEK_UP_MM		8		// max travel up when looking for an axis home
-#define HOME_SEEK_COARSE_RATIO	0.4		// how fast to seek (first pass only)
+#define LEVEL_SEEK_UP_MM		2.5		// max travel up when looking for an axis home
+#define HOME_SEEK_DOWN_RATIO	0.8
+#define HOME_SEEK_COARSE_RATIO	0.4		// how fast to seek (first pass)
+#define HOME_SEEK_FINE_RATIO	0.1		// how fast to seek (second pass)
 
 // Temporary modes: make sure to check your scope for these automatic status/instances!
 #define TEMP_RELATIVE_MODE		Backup<bool> sam(steppers_relative_mode, true)
+#define TEMP_ABSOLUTE_MODE		Backup<bool> sam(steppers_relative_mode, false)
 #define TEMP_IGNORE_LIMITS 		Backup<volatile bool> sre(steppers_respect_endstop,false);
 
 /*extern*/ uint8_t external_mode= 0;
@@ -114,31 +117,31 @@ void cmd_show_status()
 	uint8_t sl= sticky_limits;
 
 	if(stepper_are_powered())
-		info("powered");
+		info("pon");
 	else
-		info("off");
+		info("poff");
 
 	if(external_mode)
-		info("external");
+		info("ext");
 	else
-		info("calibration");
+		info("cal");
 
 	if(limits_are_enforced())
-		info("limited");
+		info("lon");
 	else
-		info("unlimited");
+		info("loff");
 
-	print_pstr(";limits=");
+	print_pstr(";stl=");
 	print_unsigned_int8(sl,2,3);
 	print_pstr("\n");
 
-	print_pstr(";rt_limits=");
+	print_pstr(";rtl=");
 	print_unsigned_int8(rl,2,3);
 	print_pstr("\n");
 
 	for(uint8_t axis=0; axis<3; ++axis)
 	{
-		print_pstr(";axis_");
+		print_pstr(";");
 		print_char('X'+axis);
 		print_char('=');
 		print_float(stepper_get_position(axis));
@@ -173,14 +176,14 @@ bool cmd_home_center()
 	// Slightly down again
 	{
 		TEMP_IGNORE_LIMITS;
-		move_modal(1.0, 0.5);
-		delay_ms(400); // add enough time for the sensors to forget the last pressure level
+		move_modal(1.0, HOME_SEEK_DOWN_RATIO);
+		delay_ms(400); // TODO: explicitly reset sensor history (default is to add enough time for the sensors to forget the last pressure level)
 	}
 
 	// Fine upwards and set origin again
 	{
 		info("h/fine");
-		detect_up(0.05);
+		detect_up(HOME_SEEK_FINE_RATIO);
 		set_origin();
 	}
 
@@ -204,18 +207,21 @@ bool cmd_home_center()
 // ======================= One axis only =======================
 
 
-bool cmd_home_axis(uint8_t axis)
+bool cmd_calibrate_axis(uint8_t axis)
 {
 	TEMP_RELATIVE_MODE;
+
+	float initialPos= stepper_get_position(axis); // so as to go back to it on failure and not leave the bed skewed
 
 	// Coarse upwards (first home seek at medium speed)
 	{
 		info("hn/coarse");
 		if(!detect_up_axis(axis, HOME_SEEK_COARSE_RATIO))
 		{
-			nmi_reset= true; // hard failure: homing is vital
-			return error("hn/coarse");
+			error("hn/coarse");
+			goto failure;
 		}
+		initialPos-= stepper_get_position(axis);
 		set_origin_single(axis);
 		delay_ms(100);
 	}
@@ -223,15 +229,19 @@ bool cmd_home_axis(uint8_t axis)
 	// Slightly down again
 	{
 		TEMP_IGNORE_LIMITS;
-		move_modal_axis(axis, 1.0, 0.5);
+		move_modal_axis(axis, 1.0, HOME_SEEK_DOWN_RATIO);
 		delay_ms(400); // add enough time for the sensors to forget the last pressure level
 	}
 
 	// Fine upwards and set origin again
 	{
 		info("hn/fine");
-		if(!detect_up_axis(axis, 0.05))
-			return error("hn/fine");
+		if(!detect_up_axis(axis, HOME_SEEK_FINE_RATIO))
+		{
+			error("hn/fine");
+			goto failure;
+		}
+		initialPos-= stepper_get_position(axis);
 		set_origin_single(axis);
 	}
 
@@ -244,7 +254,6 @@ bool cmd_home_axis(uint8_t axis)
 			error("h/unstick");
 		}
 		info("hn/origin");
-		// cmd_show_status(); // debug
 		set_origin_single(axis);
 		delay_ms(100);
 		sticky_limits &= ~(1<<(axis+1)); // sometimes the bed is slightly elastic
@@ -252,6 +261,15 @@ bool cmd_home_axis(uint8_t axis)
 
 	// success
 	return true;
+
+failure:
+	{
+		TEMP_ABSOLUTE_MODE;
+		TEMP_IGNORE_LIMITS;
+		move_modal_axis(axis, initialPos, HOME_SEEK_DOWN_RATIO/2);
+		nmi_reset= true; // hard failure: calibration is vital
+		return false;
+	}
 }
 
 
@@ -408,8 +426,8 @@ bool run(const char* cmd/*= NULL*/)
 	{
 		if(cmd1 && !cmd[2])
 		{
-			if(cmd1=='r')	{ steppers_relative_mode= true; return true; }
-			if(cmd1=='a')	{ steppers_relative_mode= false; return true; }
+			if(cmd1=='R')	{ steppers_relative_mode= true; return true; }
+			if(cmd1=='A')	{ steppers_relative_mode= false; return true; }
 		}
 		info("R|A?");
 		return false;
@@ -441,7 +459,7 @@ bool run(const char* cmd/*= NULL*/)
 		uint8_t axis= (cmd1-'0');
 		if(axis>2) { info("0-N?"); return false; }
 		stepper_power(true); // one way to boot up the steppers
-		return cmd_home_axis(axis);
+		return cmd_calibrate_axis(axis);
 	}
 
 	if(cmd0=='x') // x or x<0-2> - clear sticky limits and resume movement if any (dangerous)

@@ -67,7 +67,7 @@ void print_char(const char s);
 void print_string(const char *s);
 
 #define print_pstr(s) _print_pstr(PSTR(s), 0)
-#define print_pstr_slow(s) _print_pstr(PSTR(s), 10)
+#define print_pstr_slow(s) _print_pstr(PSTR(s), 100)
 void _print_pstr(const char *s, int slow_us=0);
 
 void print_integer(long n);

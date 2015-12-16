@@ -36,8 +36,8 @@ D (digital pins 0 to 7)
 #define BASE_TIMER_PERIOD			64		// how often the interrupt fires (clk * 8) -- at max speed, half a step can be made on each interrupt -- lowest possible
 
 #define STEPPER_STEPS_TO_FULL_SPEED	1024	// number of stepper steps (i.e. distance) before it can reach full speed -- better use a power of two (faster)
-#define STEPPER_MIN_SPEED			40		// minimum safe speed for abrupt start and stop
-#define STEPPER_MAX_SPEED			200	// stepper full speed (max. increase to the accumulator on each interrupt)
+#define STEPPER_MIN_SPEED			30		// minimum safe speed for abrupt start and stop
+#define STEPPER_MAX_SPEED			200		// stepper full speed (max. increase to the accumulator on each interrupt)
 #define FIXED_POINT_OVF				256		// (half) movement occurs when accumulator overshoots this value (higher or equal to STEPPER_MAX_SPEED)
 
 bool steppers_relative_mode= false;
@@ -301,9 +301,11 @@ uint8_t move_modal_axis(uint8_t axis, float pos, float speed_factor)
 
 void set_origin()
 {
+	uint8_t sreg= SREG;
 	for(uint8_t axis=0; axis<3; ++axis)
 		stepper_zero(axis);
 	sticky_limits= 0;
+	SREG= sreg;
 }
 
 void set_origin_single(uint8_t axis)

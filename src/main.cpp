@@ -63,8 +63,6 @@ int main(void)
 	}
 	#endif
 
-	delay_ms(1000); // 1 second delay so that the master may boot at its pace first...
-
 	print_pstr(";BOOT\n");
 	for(;;)
 	{
@@ -91,17 +89,22 @@ int main(void)
 		// Here on fatal/reset: retract the bed a little
 		nmi_reset= false;
 		steppers_zero(); // clear all stepper movement
+		limits_enable();
+		external_init();
 
-		print_pstr(";RESET\n");
-		// set_origin(); // probably not a good idea
-		delay_ms(10);
-		Backup<bool> sam(steppers_relative_mode, true);
-		stepper_set_targets(10, 0.8);
-		delay_ms(10);
-		stepper_power(false);
-		delay_ms(10);
-
-		nmi_reset= false;
+		// Must be in its own block!
+		{
+			print_pstr(";RESET\n");
+			external_mode= 0;
+			steppers_relative_mode= false;
+			set_origin(); // ... not sure it is a good idea though
+			delay_ms(10);
+			stepper_power(false);
+			delay_ms(10);
+			nmi_reset= false;
+			serial_reset_read_buffer();
+			print_pstr("$RESET\n");
+		}
 	}
 	return 0; // Never reached
 }
