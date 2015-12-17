@@ -301,14 +301,14 @@ uint8_t move_modal(float pos, float speed_factor)
 {
 	stepper_set_targets(pos, speed_factor);
 	while(!nmi_reset && steppers_are_moving());
-	return sticky_limits == 0;
+	return !nmi_reset && sticky_limits == 0;
 }
 
 uint8_t move_modal_axis(uint8_t axis, float pos, float speed_factor)
 {
 	stepper_set_target(axis, pos, speed_factor);
 	while(!nmi_reset && stepper_is_moving(axis));
-	return sticky_limits == 0;
+	return !nmi_reset && sticky_limits == 0;
 }
 
 void set_origin()

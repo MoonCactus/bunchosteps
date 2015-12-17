@@ -195,7 +195,7 @@ bool cmd_home_center()
 		if(!detect_up(HOME_SEEK_COARSE_RATIO))
 		{
 			nmi_reset= true; // hard failure: homing is vital
-			return error("h/coarse");
+			return false;
 		}
 		delay_ms(10);
 	}
@@ -215,11 +215,11 @@ bool cmd_home_center()
 
 	// Down until sensors detect nothing anymore
 	{
-		info("h/back");
+		info("h/detach");
 		if(!down_detach())
 		{
 			nmi_reset= true; // hard failure: homing is vital
-			error("h/unstick");
+			return false;
 		}
 		info("h/origin");
 		// cmd_show_status(); // debug
@@ -240,13 +240,12 @@ bool cmd_calibrate_axis(uint8_t axis)
 	if(axis==0)
 		return cmd_home_center(); // axis zero is the reference, so calibrating axis zero is equivalent to homing + set origin
 
-	// common coarse upwards (homing without setting origins)
+	// *common* coarse upwards (homing without setting origins)
 	{
 		info("cn/common");
-		if(!detect_up(HOME_SEEK_COARSE_RATIO)) { error("cn/common"); goto failure; }
+		if(!detect_up(HOME_SEEK_COARSE_RATIO)) goto failure;
 		delay_ms(100);
 	}
-//info(">>initial common ground (zero when fine)"); cmd_show_status(); delay_ms(3999);
 
 	// Single axis detaches slightly downwards
 	{
@@ -258,33 +257,22 @@ bool cmd_calibrate_axis(uint8_t axis)
 	// Single axis fine upwards
 	{
 		info("cn/fine");
-		if(!detect_up_axis(axis, HOME_SEEK_FINE_RATIO))
-		{
-			error("cn/fine");
-			goto failure;
-		}
+		if(!detect_up_axis(axis, HOME_SEEK_FINE_RATIO)) goto failure;
 	}
 
-	// And down until sensors detect nothing anymore
+	// And down again until sensors detect nothing anymore
 	{
 		info("cn/backd");
-		if(!down_detach_single(axis))
-		{
-			error("cn/unstick");
-			goto failure;
-		}
-		info("cn/offset");
-
-//info("individual contact position"); cmd_show_status(); delay_ms(3999);
-
-		// here we are: numerically, we say we are at the same position as the reference axis
-		stepper_zero(axis);
-		//stepper_override_position(axis, 0);
-
-//info(">>overridden axis position"); cmd_show_status(); delay_ms(3999);
-
+		if(!down_detach_single(axis)) goto failure;
 		delay_ms(100);
+		if(!down_detach_single(axis)) goto failure; // huh ...
 		sticky_limits &= ~(1<<(axis+1)); // sometimes the bed is slightly elastic
+	}
+
+	// here we are: numerically, we say we are at the same position as the reference axis, i.e. zero as we homed
+	{
+		info("cn/offset");
+		stepper_zero(axis);
 	}
 
 	// success
@@ -375,7 +363,7 @@ bool run(const char* cmd/*= NULL*/)
 	{
 		print_pstr_slow(";help:\n\
 ;! - status\n\
-;$<C|E> - config vs. external mode\n\
+;=<C|E> - config vs. external mode\n\
 ;s<0-2> - settle here\n\
 ;p<0|1> - power\n\
 ;s<ratio> - speed ratio\n\
@@ -414,7 +402,7 @@ bool run(const char* cmd/*= NULL*/)
 
 	// ---------------------------------------------------------------------------------------- config
 
-	if(cmd0=='$') // $<C|E> - configuration/external drive. Transparent just transmits dir/steps from input pins.
+	if(cmd0=='=') // =<C|E> - configuration/external drive. Transparent just transmits dir/steps from input pins.
 	{
 		if(cmd1 && !cmd[2])
 		{

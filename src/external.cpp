@@ -64,7 +64,7 @@ ISR(CONTROL_INT_vect)
 		// The master sent a step pulse
 		if(pin & (1<<EXT_STEP_BIT))
 		{
-			if(external_mode) // only in "external mode" ($E, vs. default $C configuration mode)
+			if(external_mode) // only in "external mode" (=E, vs. default =C configuration mode)
 			{
 				if(CONTROL_PIN & (1<<EXT_DIR_BIT))
 					DIRECTION_ALL_ON();
