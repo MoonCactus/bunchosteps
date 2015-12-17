@@ -12,11 +12,16 @@
 #include "serial.h"
 #include "steppers.h"
 
+#define EPSILON_POS				0.01	// calibration is considered OK when diff is below with value
+
 #define HOME_SEEK_UP_MM			400.0	// bed may start completely at the bottom
-#define LEVEL_SEEK_UP_MM		2.5		// max travel up when looking for an axis home
-#define HOME_SEEK_DOWN_RATIO	0.8
+#define SEEK_DOWN_RATIO			0.8		// we don't want to trigger any sensor
+#define SEEK_DOWN_SETTLE_MS		400		// time to wait before seeking up again slowly
 #define HOME_SEEK_COARSE_RATIO	0.4		// how fast to seek (first pass)
 #define HOME_SEEK_FINE_RATIO	0.1		// how fast to seek (second pass)
+
+#define CALIBRATION_PRE_SEEK_MM	1.0		// retract after coarse look up
+#define CALIBRATION_SEEK_UP_MM	2.0		// max travel up when looking for an axis home
 
 // Temporary modes: make sure to check your scope for these automatic status/instances!
 #define TEMP_RELATIVE_MODE		Backup<bool> sam(steppers_relative_mode, true)
@@ -48,6 +53,27 @@ void info(const char* cmd)
 	delay_ms(10);
 }
 
+void info(const char* cmd, float v)
+{
+	print_char(';');
+	print_string(cmd);
+	print_float(v);
+	print_char('\n');
+	delay_ms(10);
+}
+
+void info_axis(int axis)
+{
+	print_string(";axis:H");
+	print_integer(axis);
+	print_char('=');
+	print_float( stepper_get_position(axis) );
+	print_string(",L");
+	print_char(sticky_limit_is_hit(axis)?'1':'0');
+	print_char('\n');
+	delay_ms(10);
+}
+
 bool success(const char* cmd)
 {
 	print_char('$');
@@ -65,6 +91,7 @@ bool detect_up(float speed)
 	// Up by 20 (expecting to hit the limits, head is in the center of the bed, bed is approximately flat -- as always!)
 	sticky_limits= 0;
 	move_modal(-HOME_SEEK_UP_MM, speed); // slow upwards (we're expecting to trigger one or many end stops, so check sticky_limits!)
+	steppers_settle_here();
 	delay_ms(10);
 	return(sticky_limits!=0);
 }
@@ -74,7 +101,8 @@ bool detect_up_axis(uint8_t axis, float speed)
 	TEMP_RELATIVE_MODE;
 	// Up by 20 (expecting to hit the limits, head is in the center of the bed, bed is approximately flat -- as always!)
 	sticky_limits= 0;
-	move_modal_axis(axis, -LEVEL_SEEK_UP_MM, speed); // slow upwards. We're expecting to trigger at least one end stop
+	move_modal_axis(axis, -CALIBRATION_SEEK_UP_MM, speed); // slow upwards. We're expecting to trigger at least one end stop
+	stepper_settle_here(axis);
 	delay_ms(10);
 	return((sticky_limits&(1<<axis))!=0); // we want this axis to hit the limit
 }
@@ -155,7 +183,7 @@ void cmd_show_status()
 }
 
 /**
- * 3-way simultaneaous homing (standard homing after calibration)
+ * 3-way simultaneaous homing and origin (standard homing after calibration)
  */
 bool cmd_home_center()
 {
@@ -167,24 +195,22 @@ bool cmd_home_center()
 		if(!detect_up(HOME_SEEK_COARSE_RATIO))
 		{
 			nmi_reset= true; // hard failure: homing is vital
-			return error("hn/upwards");
+			return error("h/coarse");
 		}
-		set_origin();
 		delay_ms(10);
 	}
 
 	// Slightly down again
 	{
 		TEMP_IGNORE_LIMITS;
-		move_modal(1.0, HOME_SEEK_DOWN_RATIO);
-		delay_ms(400); // TODO: explicitly reset sensor history (default is to add enough time for the sensors to forget the last pressure level)
+		move_modal(CALIBRATION_PRE_SEEK_MM, SEEK_DOWN_RATIO);
+		delay_ms(SEEK_DOWN_SETTLE_MS); // TODO: sensor module reset, to avoid this pause for the sensors to forget the above touched pressure level
 	}
 
 	// Fine upwards and set origin again
 	{
 		info("h/fine");
 		detect_up(HOME_SEEK_FINE_RATIO);
-		set_origin();
 	}
 
 	// Down until sensors detect nothing anymore
@@ -211,50 +237,52 @@ bool cmd_calibrate_axis(uint8_t axis)
 {
 	TEMP_RELATIVE_MODE;
 
-	float initialPos= stepper_get_position(axis); // so as to go back to it on failure and not leave the bed skewed
+	if(axis==0)
+		return cmd_home_center(); // axis zero is the reference, so calibrating axis zero is equivalent to homing + set origin
 
-	// Coarse upwards (first home seek at medium speed)
+	// common coarse upwards (homing without setting origins)
 	{
-		info("hn/coarse");
-		if(!detect_up_axis(axis, HOME_SEEK_COARSE_RATIO))
-		{
-			error("hn/coarse");
-			goto failure;
-		}
-		initialPos-= stepper_get_position(axis);
-		set_origin_single(axis);
+		info("cn/common");
+		if(!detect_up(HOME_SEEK_COARSE_RATIO)) { error("cn/common"); goto failure; }
 		delay_ms(100);
 	}
+//info(">>initial common ground (zero when fine)"); cmd_show_status(); delay_ms(3999);
 
-	// Slightly down again
+	// Single axis detaches slightly downwards
 	{
 		TEMP_IGNORE_LIMITS;
-		move_modal_axis(axis, 1.0, HOME_SEEK_DOWN_RATIO);
-		delay_ms(400); // add enough time for the sensors to forget the last pressure level
+		move_modal_axis(axis, CALIBRATION_PRE_SEEK_MM, SEEK_DOWN_RATIO);
+		delay_ms(SEEK_DOWN_SETTLE_MS); // add enough time for the sensors to forget the last pressure level
 	}
 
-	// Fine upwards and set origin again
+	// Single axis fine upwards
 	{
-		info("hn/fine");
+		info("cn/fine");
 		if(!detect_up_axis(axis, HOME_SEEK_FINE_RATIO))
 		{
-			error("hn/fine");
+			error("cn/fine");
 			goto failure;
 		}
-		initialPos-= stepper_get_position(axis);
-		set_origin_single(axis);
 	}
 
-	// Down until sensors detect nothing anymore
+	// And down until sensors detect nothing anymore
 	{
-		info("hn/backd");
+		info("cn/backd");
 		if(!down_detach_single(axis))
 		{
-			nmi_reset= true; // hard failure: homing is vital
-			error("h/unstick");
+			error("cn/unstick");
+			goto failure;
 		}
-		info("hn/origin");
-		set_origin_single(axis);
+		info("cn/offset");
+
+//info("individual contact position"); cmd_show_status(); delay_ms(3999);
+
+		// here we are: numerically, we say we are at the same position as the reference axis
+		stepper_zero(axis);
+		//stepper_override_position(axis, 0);
+
+//info(">>overridden axis position"); cmd_show_status(); delay_ms(3999);
+
 		delay_ms(100);
 		sticky_limits &= ~(1<<(axis+1)); // sometimes the bed is slightly elastic
 	}
@@ -266,7 +294,6 @@ failure:
 	{
 		TEMP_ABSOLUTE_MODE;
 		TEMP_IGNORE_LIMITS;
-		move_modal_axis(axis, initialPos, HOME_SEEK_DOWN_RATIO/2);
 		nmi_reset= true; // hard failure: calibration is vital
 		return false;
 	}
@@ -310,8 +337,8 @@ bool command_collect()
 const char* string_to_float(const char* p, float* v)
 {
 	float value= 0;
-	bool neg= false;
-	if(*p=='-') { neg=true; ++p; }
+	bool negate= false;
+	if(*p=='-') { negate=true; ++p; }
 	while(*p>='0' && *p<='9')
 		value= (value*10) + (*(p++)-'0');
 	if(*p=='.')
@@ -324,7 +351,7 @@ const char* string_to_float(const char* p, float* v)
 			k/= 10;
 		}
 	}
-	if(neg) value= -value;
+	if(negate) value= -value;
 	*v= value;
 	return p;
 }
@@ -352,14 +379,15 @@ bool run(const char* cmd/*= NULL*/)
 ;s<0-2> - settle here\n\
 ;p<0|1> - power\n\
 ;s<ratio> - speed ratio\n\
-;m<R|A> - relative vs. absolute mode\n\
+;m<R|A> - relative/absolute\n\
 ;x<0-2> - clear limits\n\
 ;l<0|1> - respect limits\n\
-;o<0-2> - off limits\n\
+;d<0-2> - detach from limits\n\
 ;h - main home\n\
 ;z<0-2> - zero origin\n\
 ;c<0-2> - calibrate\n\
-;g<height> - move bed\n");
+;o<0-2,mm> - override position\n\
+;g<mm> - move bed\n");
 		return true;
 	}
 
@@ -379,7 +407,7 @@ bool run(const char* cmd/*= NULL*/)
 			return true;
 		}
 		uint8_t axis= (cmd1-'0');
-		if(axis>2) { info("0-N?"); return false; }
+		if(axis>2) goto badAxis;
 		stepper_settle_here(axis);
 		return true;
 	}
@@ -393,7 +421,7 @@ bool run(const char* cmd/*= NULL*/)
 			if(cmd1=='C')	{ external_mode= 0; return true; }
 			if(cmd1=='E')	{ external_mode= 1; return true; }
 		}
-		info("0|1?");
+		info("C|E?");
 		return false;
 	}
 
@@ -404,8 +432,7 @@ bool run(const char* cmd/*= NULL*/)
 			if(cmd1=='0')	{ stepper_power(false); return true; }
 			if(cmd1=='1')	{ stepper_power(true); return true; }
 		}
-		info("0|1?");
-		return false;
+		goto badAxis;
 	}
 
 	if(cmd0=='r') // r<ratio> - speed ratio
@@ -440,8 +467,7 @@ bool run(const char* cmd/*= NULL*/)
 			if(cmd1=='0')	{ limits_disable(); return true; }
 			if(cmd1=='1')	{ limits_enable(); return true; }
 		}
-		info("0|1?");
-		return false;
+		goto badAxis;
 	}
 
 
@@ -457,7 +483,7 @@ bool run(const char* cmd/*= NULL*/)
 	if(cmd0=='c') // c<0-2> - calibrate
 	{
 		uint8_t axis= (cmd1-'0');
-		if(axis>2) { info("0-N?"); return false; }
+		if(axis>2) goto badAxis;
 		stepper_power(true); // one way to boot up the steppers
 		return cmd_calibrate_axis(axis);
 	}
@@ -471,18 +497,18 @@ bool run(const char* cmd/*= NULL*/)
 			return true;
 		}
 		uint8_t axis= (cmd1-'0');
-		if(axis>2) { info("0-N?"); return false; }
+		if(axis>2) goto badAxis;
 		sticky_limits &= ~(1<<axis);
 		return true;
 	}
 
-	if(cmd0=='o') // o or o<0-2> - get down, out of the limits
+	if(cmd0=='d') // d or d<0-2> - detach from limits by moving down
 	{
 		if(!enabled()) return false;
 		if(!cmd1)
 			return(down_detach());
 		uint8_t axis= (cmd1-'0');
-		if(axis>2) { info("0-N?"); return false; }
+		if(axis>2) goto badAxis;
 		return down_detach_single(axis);
 
 	}
@@ -497,7 +523,7 @@ bool run(const char* cmd/*= NULL*/)
 			return true;
 		}
 		uint8_t axis= (cmd1-'0');
-		if(axis>2) { info("0-N?"); return false; }
+		if(axis>2) goto badAxis;
 		set_origin_single(axis);
 		return true;
 	}
@@ -507,11 +533,7 @@ bool run(const char* cmd/*= NULL*/)
 		if(!enabled()) return false;
 		float pos;
 		const char* p= string_to_float(cmd+1, &pos);
-		if(*p)
-		{
-			info("height?");
-			return false;
-		}
+		if(*p) goto badHeight;
 
 		if(move_modal(pos, speed_factor))
 			return true;
@@ -521,10 +543,31 @@ bool run(const char* cmd/*= NULL*/)
 		return false;
 	}
 
+	if(cmd0=='o') // o<0-2=mm> : override axis position
+	{
+		uint8_t axis= (cmd1-'0');
+		if(axis>2) goto badAxis;
+		cmd+=2;
+		while(*cmd && *cmd!='-' && *cmd!='.' && (*cmd<'0' || *cmd>'9')) ++cmd;
+		float new_position;
+		const char* p= string_to_float(cmd, &new_position);
+		if(*p) goto badHeight;
+		stepper_override_position(axis, new_position);
+		info_axis(axis);
+		return true;
+	}
+
 	// ----------------------------------------------------------------------------------------
 
 	info("unknown");
+	return false;
 
+badAxis:
+	info("0-N?");
+	return false;
+
+badHeight:
+	info("height?");
 	return false;
 }
 

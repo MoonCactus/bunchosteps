@@ -111,7 +111,10 @@ void steppers_settle_here()
 	uint8_t sreg= SREG;
 	cli();
 	for(uint8_t axis=0; axis<3; ++axis)
-		stepper_zero(axis);
+	{
+		volatile stepper_data* s = &steppers[axis];
+		s->target= s->position;
+	}
 	SREG= sreg;
 }
 
@@ -189,6 +192,15 @@ float stepper_get_position(uint8_t axis)
 {
 	return (float)steppers[axis].position / (2 * STEPS_PER_MM);
 }
+
+void stepper_override_position(uint8_t axis, float mm)
+{
+	uint8_t sreg= SREG;
+	steppers[axis].position= (2 * STEPS_PER_MM) * mm;
+	stepper_settle_here(axis);
+	SREG= sreg;
+}
+
 
 int stepper_get_direction(uint8_t axis)
 {
@@ -313,4 +325,5 @@ void set_origin_single(uint8_t axis)
 	stepper_zero(axis);
 	sticky_limits &= ~(1<<(axis+1));
 }
+
 

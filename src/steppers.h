@@ -47,6 +47,7 @@ bool stepper_is_moving(uint8_t axis);
 bool steppers_are_moving();
 
 float stepper_get_position(uint8_t axis);
+void stepper_override_position(uint8_t axis, float mm);
 int stepper_get_direction(uint8_t axis);
 
 // ================= high level calls =================
