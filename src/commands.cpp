@@ -459,7 +459,7 @@ bool run(const char* cmd/*= NULL*/)
 		return cmd_calibrate_axis(axis);
 	}
 
-	if(cmd0=='x') // x or x<0-2> - clear sticky limits and resume movement if any (dangerous)
+	if(cmd0=='x') // x or x<0-2> - clear sticky limits and force/resume movement if any (dangerous)
 	{
 		steppers_zero_speed(); // make sure steppers restart at low speed
 		if(!cmd1)

@@ -139,6 +139,7 @@ void steppers_zero_speed()
 {
 	uint8_t sreg= SREG;
 	cli();
+	Backup<bool> srm(steppers_relative_mode, false);
 	for(int axis=0; axis<3; ++axis)
 	{
 		float target= float(steppers[axis].target) / (2 * STEPS_PER_MM);
