@@ -85,28 +85,6 @@ bool success(const char* cmd)
 
 // ======================= helpers =======================
 
-bool detect_up(float speed)
-{
-	TEMP_RELATIVE_MODE;
-	// Up by 20 (expecting to hit the limits, head is in the center of the bed, bed is approximately flat -- as always!)
-	sticky_limits= 0;
-	move_modal(-HOME_SEEK_UP_MM, speed); // slow upwards (we're expecting to trigger one or many end stops, so check sticky_limits!)
-	steppers_settle_here();
-	delay_ms(10);
-	return(sticky_limits!=0);
-}
-
-bool detect_up_axis(uint8_t axis, float speed)
-{
-	TEMP_RELATIVE_MODE;
-	// Up by 20 (expecting to hit the limits, head is in the center of the bed, bed is approximately flat -- as always!)
-	sticky_limits= 0;
-	move_modal_axis(axis, -CALIBRATION_SEEK_UP_MM, speed); // slow upwards. We're expecting to trigger at least one end stop
-	stepper_settle_here(axis);
-	delay_ms(10);
-	return((sticky_limits&(1<<axis))!=0); // we want this axis to hit the limit
-}
-
 /**
  * Move bed down until sensors are no more activated.
  * The usual context is to call this *immediately* after homing up and before setting home with z
@@ -118,8 +96,8 @@ bool down_detach()
 	TEMP_RELATIVE_MODE;
 	sticky_limits= 0;
 	if(limits_get_rt_states()) stepper_set_targets(5, 0.01); // very slow asynchronous call: just to detach the bed from the tool head
-	while(limits_get_rt_states() && steppers_are_moving() && !nmi_reset);
-	stepper_set_targets(0, 0.5); // stop all movement asap (we are in relative mode and we ignore sticky limits)
+	while(limits_get_rt_states() && steppers_are_moving() && !nmi_reset); // TODO: add length limit!
+	steppers_settle_here(); // stop all movement asap
 	return !limits_get_rt_states();
 }
 
@@ -132,9 +110,35 @@ bool down_detach_single(uint8_t axis)
 
 	if(limits_get_rt_states()&(1<<axis)) stepper_set_target(axis, 5, 0.01); // asynchronous call: down slowly, just to detach the bed from the tool head
 	while((limits_get_rt_states()&(1<<axis)) && stepper_is_moving(axis) && !nmi_reset);
-	stepper_set_target(axis,0, 0.5); // stop all movement asap (we are in relative mode and we ignore sticky limits)
+	stepper_settle_here(axis); // stop all movement asap
 
 	return !(limits_get_rt_states() & (1<<axis));
+}
+
+// Detect bed upwards and retract a little to detach from the sensor
+bool detect_up(float speed)
+{
+	TEMP_RELATIVE_MODE;
+	// Up by 20 (expecting to hit the limits, head is in the center of the bed, bed is approximately flat -- as always!)
+	sticky_limits= 0;
+	move_modal(-HOME_SEEK_UP_MM, speed); // slow upwards (we're expecting to trigger one or many end stops)
+	steppers_settle_here();
+	bool ret= (sticky_limits!=0); // positive when sticky_limits is enabled
+	down_detach(); delay_ms(100); down_detach();
+	return ret;
+}
+
+// Detect bed upwards and retract a little to detach from the sensor
+bool detect_up_axis(uint8_t axis, float speed)
+{
+	TEMP_RELATIVE_MODE;
+	// Up by 20 (expecting to hit the limits, head is in the center of the bed, bed is approximately flat -- as always!)
+	sticky_limits= 0;
+	move_modal_axis(axis, -CALIBRATION_SEEK_UP_MM, speed); // slow upwards. We're expecting to trigger at least one end stop
+	stepper_settle_here(axis);
+	bool ret= ((sticky_limits&(1<<axis))!=0); // we want this axis to hit the limit
+	down_detach_single(axis); delay_ms(100); down_detach_single(axis);
+	return ret;
 }
 
 // ======================= All 3 axis =======================
@@ -183,51 +187,42 @@ void cmd_show_status()
 }
 
 /**
- * 3-way simultaneaous homing and origin (standard homing after calibration)
+ * 3-way simultaneous homing and origin ("standard homing", may occur after calibration)
  */
 bool cmd_home_center()
 {
 	TEMP_RELATIVE_MODE;
+	limits_enable();
 
 	// Coarse upwards (first home seek at medium speed)
 	{
 		info("h/coarse");
-		if(!detect_up(HOME_SEEK_COARSE_RATIO))
-		{
-			nmi_reset= true; // hard failure: homing is vital
-			return false;
-		}
-		delay_ms(10);
+		if(!detect_up(HOME_SEEK_COARSE_RATIO)) goto failToDetectUpwards;
 	}
 
-	// Slightly down again
+	// Down by a little bit again to redo a finer seek
 	{
 		TEMP_IGNORE_LIMITS;
 		move_modal(CALIBRATION_PRE_SEEK_MM, SEEK_DOWN_RATIO);
-		delay_ms(SEEK_DOWN_SETTLE_MS); // TODO: sensor module reset, to avoid this pause for the sensors to forget the above touched pressure level
+		delay_ms(SEEK_DOWN_SETTLE_MS); // TODO: we should be able to reset the sensor module (so as to forget the pressure event)
 	}
 
-	// Fine upwards and set origin again
+	// Upwards again, but slower
 	{
 		info("h/fine");
-		detect_up(HOME_SEEK_FINE_RATIO);
+		if(!detect_up(HOME_SEEK_FINE_RATIO)) goto failToDetectUpwards;
 	}
 
-	// Down until sensors detect nothing anymore
-	{
-		info("h/detach");
-		if(!down_detach())
-		{
-			nmi_reset= true; // hard failure: homing is vital
-			return false;
-		}
-		info("h/origin");
-		// cmd_show_status(); // debug
-		set_origin();
-		delay_ms(100);
-		sticky_limits= 0; // sometimes the bed is slightly elastic
-	}
+	// Finalize
+	info("h/origin");
+	set_origin();
+	delay_ms(50);
+	sticky_limits= 0; // sometimes the bed is slightly elastic
 	return true;
+
+failToDetectUpwards:
+	nmi_reset= true; // hard failure: homing is vital
+	return false;
 }
 
 // ======================= One axis only =======================
@@ -236,40 +231,32 @@ bool cmd_home_center()
 bool cmd_calibrate_axis(uint8_t axis)
 {
 	TEMP_RELATIVE_MODE;
+	limits_enable();
 
 	if(axis==0)
 		return cmd_home_center(); // axis zero is the reference, so calibrating axis zero is equivalent to homing + set origin
 
-	// *common* coarse upwards (homing without setting origins)
+	// Grouped coarse upwards (aka homing without setting origins)
 	{
 		info("cn/common");
 		if(!detect_up(HOME_SEEK_COARSE_RATIO)) goto failure;
 		delay_ms(100);
 	}
 
-	// Single axis detaches slightly downwards
+	// Lower the individual axis slightly
 	{
 		TEMP_IGNORE_LIMITS;
 		move_modal_axis(axis, CALIBRATION_PRE_SEEK_MM, SEEK_DOWN_RATIO);
 		delay_ms(SEEK_DOWN_SETTLE_MS); // add enough time for the sensors to forget the last pressure level
 	}
 
-	// Single axis fine upwards
+	// Seek end stop upwards for this axis
 	{
 		info("cn/fine");
 		if(!detect_up_axis(axis, HOME_SEEK_FINE_RATIO)) goto failure;
 	}
 
-	// And down again until sensors detect nothing anymore
-	{
-		info("cn/backd");
-		if(!down_detach_single(axis)) goto failure;
-		delay_ms(100);
-		if(!down_detach_single(axis)) goto failure; // huh ...
-		sticky_limits &= ~(1<<(axis+1)); // sometimes the bed is slightly elastic
-	}
-
-	// here we are: numerically, we say we are at the same position as the reference axis, i.e. zero as we homed
+	// Numerically, we say we are back at the same height as the reference axis, i.e. zero since we homed in the first place
 	{
 		info("cn/offset");
 		stepper_zero(axis);
@@ -279,12 +266,8 @@ bool cmd_calibrate_axis(uint8_t axis)
 	return true;
 
 failure:
-	{
-		TEMP_ABSOLUTE_MODE;
-		TEMP_IGNORE_LIMITS;
-		nmi_reset= true; // hard failure: calibration is vital
-		return false;
-	}
+	nmi_reset= true; // hard failure: calibration is vital
+	return false;
 }
 
 
@@ -407,7 +390,7 @@ bool run(const char* cmd/*= NULL*/)
 		if(cmd1 && !cmd[2])
 		{
 			if(cmd1=='C')	{ external_mode= 0; return true; }
-			if(cmd1=='E')	{ external_mode= 1; return true; }
+			if(cmd1=='E')	{ stepper_power(true); external_mode= 1; return true; }
 		}
 		info("C|E?");
 		return false;

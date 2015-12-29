@@ -30,7 +30,7 @@ D (digital pins 0 to 7)
 #include "limits.h"
 #include "serial.h"
 
-#define STEPS_PER_MM				400		// how many steps for 1 mm (depends on stepper and microstep sattings)
+#define STEPS_PER_MM				400		// how many steps for 1 mm (depends on stepper and microstep settings)
 #define ENFORCE_SHARED_LIMITS				// undefine to have the steppers check only their respective limit when moving (probably unsafe)
 
 #define BASE_TIMER_PERIOD			64		// how often the interrupt fires (clk * 8) -- at max speed, half a step can be made on each interrupt -- lowest possible
