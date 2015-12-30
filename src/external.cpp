@@ -69,15 +69,17 @@ ISR(CONTROL_INT_vect)
 	// serial_write( (pin & (1<<EXT_STEP_BIT)) ? 1 : 0 );
 
 	// Enter only if any CONTROL pin is detected as active.
-	// The master sent a step pulse
+
+	// The master sent a step pulse (we're in external mode, aka slave mode "=E")
 	if(external_mode) // -- && (pin & (1<<EXT_STEP_BIT))
 	{
-		// only in "external mode" (=E, vs. default =C configuration mode)
+		// direction
 		if(CONTROL_PIN & (1<<EXT_DIR_BIT))
 			DIRECTION_ALL_ON();
 		else
 			DIRECTION_ALL_OFF();
 
+		// step pulse (grouped or individual)
 		uint8_t axis= MUX_SEL_GET_VALUE;
 		if(axis==SEL_MUX_AXIS_ALL) // ref. TRIBED_AXIS_xxx in Tribed Marlin
 		{
@@ -86,10 +88,12 @@ ISR(CONTROL_INT_vect)
 			else
 				STEPPER_ALL_CLEAR();
 		}
-		else // 0,1,2
+		else // individual axis 0,1 or 2
 		{
 			if(CONTROL_PIN & (1<<EXT_STEP_BIT))
+			{
 				STEPPER_SET();
+			}
 			else
 				STEPPER_CLEAR();
 		}

@@ -158,6 +158,11 @@ void cmd_show_status()
 	else
 		info("cal");
 
+	if(steppers_relative_mode)
+		info("rel");
+	else
+		info("abs");
+
 	if(limits_are_enforced())
 		info("lon");
 	else
@@ -180,9 +185,7 @@ void cmd_show_status()
 		print_pstr("\n");
 	}
 
-	print_pstr(";ram=");
-	print_integer(get_free_memory());
-	print_char('\n');
+	// print_pstr(";ram="); print_integer(get_free_memory()); print_char('\n');
 
 }
 
@@ -390,7 +393,7 @@ bool run(const char* cmd/*= NULL*/)
 		if(cmd1 && !cmd[2])
 		{
 			if(cmd1=='C')	{ external_mode= 0; return true; }
-			if(cmd1=='E')	{ stepper_power(true); external_mode= 1; return true; }
+			if(cmd1=='E')	{ stepper_power(true); /*steppers_settle_here();*/ external_mode= 1; return true; }
 		}
 		info("C|E?");
 		return false;
@@ -481,7 +484,6 @@ bool run(const char* cmd/*= NULL*/)
 		uint8_t axis= (cmd1-'0');
 		if(axis>2) goto badAxis;
 		return down_detach_single(axis);
-
 	}
 
 	// ---------------------------------------------------------------------------------------- movement: bed height
@@ -510,7 +512,7 @@ bool run(const char* cmd/*= NULL*/)
 			return true;
 
 		info("limit_hit");
-		steppers_zero_speed(); // we will restart at slow speed if "l0" is send (i.e. do not enforce limits)
+		steppers_zero_speed(); // restart at slow speed if resumed
 		return false;
 	}
 
