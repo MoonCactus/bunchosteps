@@ -15,13 +15,13 @@
 #define EPSILON_POS				0.01	// calibration is considered OK when diff is below with value
 
 #define HOME_SEEK_UP_MM			400.0	// bed may start completely at the bottom
-#define SEEK_DOWN_RATIO			0.8		// we don't want to trigger any sensor
+#define SEEK_DOWN_RATIO			1		// how fast to retract (limits are ignored anyway)
 #define SEEK_DOWN_SETTLE_MS		400		// time to wait before seeking up again slowly
 #define HOME_SEEK_COARSE_RATIO	0.4		// how fast to seek (first pass)
 #define HOME_SEEK_FINE_RATIO	0.1		// how fast to seek (second pass)
 
 #define CALIBRATION_PRE_SEEK_MM	1.0		// retract after coarse look up
-#define CALIBRATION_SEEK_UP_MM	2.0		// max travel up when looking for an axis home
+#define CALIBRATION_SEEK_MM		2.0	// how far to detach an axis before it is calibrated
 
 // Temporary modes: make sure to check your scope for these automatic status/instances!
 #define TEMP_RELATIVE_MODE		Backup<bool> sam(steppers_relative_mode, true)
@@ -134,7 +134,7 @@ bool detect_up_axis(uint8_t axis, float speed)
 	TEMP_RELATIVE_MODE;
 	// Up by 20 (expecting to hit the limits, head is in the center of the bed, bed is approximately flat -- as always!)
 	sticky_limits= 0;
-	move_modal_axis(axis, -CALIBRATION_SEEK_UP_MM, speed); // slow upwards. We're expecting to trigger at least one end stop
+	move_modal_axis(axis, -CALIBRATION_SEEK_MM, speed); // slow upwards. We're expecting to trigger at least one end stop
 	stepper_settle_here(axis);
 	bool ret= ((sticky_limits&(1<<axis))!=0); // we want this axis to hit the limit
 	down_detach_single(axis); delay_ms(100); down_detach_single(axis);
@@ -207,7 +207,9 @@ bool cmd_home_center()
 	{
 		TEMP_IGNORE_LIMITS;
 		move_modal(CALIBRATION_PRE_SEEK_MM, SEEK_DOWN_RATIO);
-		delay_ms(SEEK_DOWN_SETTLE_MS); // TODO: we should be able to reset the sensor module (so as to forget the pressure event)
+		// TODO: we should be able to reset the sensor module (so as to forget the pressure event),
+		// It is better than pausing like this:
+		delay_ms(SEEK_DOWN_SETTLE_MS);
 	}
 
 	// Upwards again, but slower
@@ -219,8 +221,8 @@ bool cmd_home_center()
 	// Finalize
 	info("h/origin");
 	set_origin();
-	delay_ms(50);
-	sticky_limits= 0; // sometimes the bed is slightly elastic
+	delay_ms(10);
+	sticky_limits= 0;
 	return true;
 
 failToDetectUpwards:
@@ -243,7 +245,6 @@ bool cmd_calibrate_axis(uint8_t axis)
 	{
 		info("cn/common");
 		if(!detect_up(HOME_SEEK_COARSE_RATIO)) goto failure;
-		delay_ms(100);
 	}
 
 	// Lower the individual axis slightly
