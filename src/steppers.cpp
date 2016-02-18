@@ -47,8 +47,8 @@ volatile int32_t stepper_speed= STEPPER_MAX_SPEED;
 volatile stepper_data steppers[3];
 volatile bool steppers_respect_endstop= true;
 
-#define DIRECTION_POS(a)  PORTD |=  (1<<((a)+5))
-#define DIRECTION_NEG(a)  PORTD &= ~(1<<((a)+5))
+#define DIRECTION_POS(a)  DIRECTION_PORT |=  (1<<((a)+X_DIRECTION_BIT))
+#define DIRECTION_NEG(a)  DIRECTION_PORT &= ~(1<<((a)+X_DIRECTION_BIT))
 
 void stepper_init_hw()
 {
@@ -150,7 +150,8 @@ void steppers_zero_speed()
 
 bool stepper_set_target(uint8_t axis, float mm, float speed_factor)
 {
-	if(external_mode) return false;
+	if(external_mode)
+		return false;
 
 	uint8_t sreg= SREG;
 	cli();
@@ -205,7 +206,7 @@ void stepper_override_position(uint8_t axis, float mm)
 
 int stepper_get_direction(uint8_t axis)
 {
-	return (PORTD & (1<<(axis+5))) ? +1 : -1;
+	return (DIRECTION_PORT & (1<<(axis+X_DIRECTION_BIT))) ? +1 : -1;
 }
 
 bool stepper_is_moving(uint8_t axis)

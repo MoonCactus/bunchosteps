@@ -27,6 +27,9 @@
 #ifdef CPU_MAP_ATMEGA328P // (Arduino Uno) Officially supported by Grbl.
   #include "cpu_map/cpu_map_atmega328p.h"
 #endif
+#ifdef CPU_MAP_ATMEGA328P_NANO // (Arduino Nano) Arduino Nano CNC shield
+  #include "cpu_map/cpu_map_atmega328p_nanoshield.h"
+#endif
 #ifdef CPU_MAP_ATMEGA2560 // (Arduino Mega 2560) Working @EliteEng
   #include "cpu_map/cpu_map_atmega2560.h"
 #endif

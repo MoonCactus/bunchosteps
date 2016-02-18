@@ -23,17 +23,16 @@ extern volatile int32_t stepper_speed;
 extern volatile stepper_data steppers[3];
 extern volatile bool steppers_respect_endstop;
 
-#define ALL_STEPPERS_BIT_MASK    7
-#define DIRECTION_ALL_ON()       PORTD |=  (ALL_STEPPERS_BIT_MASK<<5)
-#define DIRECTION_ALL_OFF()      PORTD &= ~(ALL_STEPPERS_BIT_MASK<<5)
+#define DIRECTION_ALL_ON()       DIRECTION_PORT |=  DIRECTION_MASK
+#define DIRECTION_ALL_OFF()      DIRECTION_PORT &= ~DIRECTION_MASK
 
-#define STEPPER_ALL_HALF_STEP()  PORTD ^=  (ALL_STEPPERS_BIT_MASK<<2)
-#define STEPPER_ALL_SET()        PORTD |=  (ALL_STEPPERS_BIT_MASK<<2)
-#define STEPPER_ALL_CLEAR()      PORTD &= ~(ALL_STEPPERS_BIT_MASK<<2)
+#define STEPPER_ALL_HALF_STEP()  STEP_PORT ^=  STEP_MASK
+#define STEPPER_ALL_SET()        STEP_PORT |=  STEP_MASK
+#define STEPPER_ALL_CLEAR()      STEP_PORT &= ~STEP_MASK
 
-#define STEPPER_HALF_STEP(axis)  PORTD ^=  (1<<(axis+2))
-#define STEPPER_SET(axis)   PORTD |=  (1<<(axis+2))
-#define STEPPER_CLEAR(axis) PORTD &= ~(1<<(axis+2))
+#define STEPPER_HALF_STEP(axis)  STEP_PORT ^=  (1<<(axis+X_STEP_BIT))
+#define STEPPER_SET(axis)        STEP_PORT |=  (1<<(axis+X_STEP_BIT))
+#define STEPPER_CLEAR(axis)      STEP_PORT &= ~(1<<(axis+X_STEP_BIT))
 
 void stepper_init();
 

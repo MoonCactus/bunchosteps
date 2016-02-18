@@ -33,7 +33,14 @@
 
 // Default cpu mappings. Grbl officially supports the Arduino Uno only. Other processor types
 // may exist from user-supplied templates or directly user-defined in cpu_map.h
-#define CPU_MAP_ATMEGA328P // Arduino Uno CPU
+//#define CPU_MAP_ATMEGA328P // Arduino Uno CPU
+#define CPU_MAP_ATMEGA328P_NANO
+
+// Start in external mode
+//#define DEFAULTS_TO_EXTERNAL_MODE
+// Auto-switch to external when receiving pulses
+#define AUTO_SWITCH_EXTERNAL
+
 
 // Number of floating decimal points printed by Grbl for certain value types. These settings are 
 // determined by realistic and commonly observed values in CNC machines. For example, position
