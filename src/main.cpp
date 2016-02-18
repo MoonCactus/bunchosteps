@@ -104,6 +104,10 @@ int main(void)
 			nmi_reset= false;
 			serial_reset_read_buffer();
 			print_pstr("$RESET\n");
+			#ifdef DEFAULTS_TO_EXTERNAL_MODE
+				stepper_power(true);
+				external_mode= 1; // defaults to external mode
+			#endif
 		}
 	}
 	return 0; // Never reached

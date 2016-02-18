@@ -35,21 +35,20 @@ D (digital pins 0 to 7)
 
 #define BASE_TIMER_PERIOD			64		// how often the interrupt fires (clk * 8) -- at max speed, half a step can be made on each interrupt -- lowest possible
 
-#define STEPPER_STEPS_TO_FULL_SPEED	1024	// number of stepper steps (i.e. distance) before it can reach full speed -- better use a power of two (faster)
-#define STEPPER_MIN_SPEED			30		// minimum safe speed for abrupt start and stop
-#define STEPPER_MAX_SPEED			140		// stepper full speed (max. increase to the accumulator on each interrupt)
-//#define STEPPER_MAX_SPEED			200		// stepper full speed (max. increase to the accumulator on each interrupt)
+#define STEPPER_STEPS_TO_FULL_SPEED	1024	// (512) number of stepper steps (i.e. distance) before it can reach full speed -- better use a power of two (faster)
+#define STEPPER_MIN_SPEED			30		// (45) minimum safe speed for abrupt start and stop
+#define STEPPER_MAX_SPEED			140		// (400) stepper full speed (max. increase to the accumulator on each interrupt)
 #define FIXED_POINT_OVF				256		// (half) movement occurs when accumulator overshoots this value (higher or equal to STEPPER_MAX_SPEED)
 
 bool steppers_relative_mode= false;
 
-volatile int32_t stepper_speed= STEPPER_MAX_SPEED;	// todo: individual stepper speeds
+volatile int32_t stepper_speed= STEPPER_MAX_SPEED;
 
 volatile stepper_data steppers[3];
-volatile bool steppers_respect_endstop= true;		// todo: individual settings (bitfield)
+volatile bool steppers_respect_endstop= true;
 
-#define DIRECTION_POS(a)  PORTD |=  (1<<((a)+5))
-#define DIRECTION_NEG(a)  PORTD &= ~(1<<((a)+5))
+#define DIRECTION_POS(a)  DIRECTION_PORT |=  (1<<((a)+X_DIRECTION_BIT))
+#define DIRECTION_NEG(a)  DIRECTION_PORT &= ~(1<<((a)+X_DIRECTION_BIT))
 
 void stepper_init_hw()
 {
@@ -151,7 +150,8 @@ void steppers_zero_speed()
 
 bool stepper_set_target(uint8_t axis, float mm, float speed_factor)
 {
-	if(external_mode) return false;
+	if(external_mode)
+		return false;
 
 	uint8_t sreg= SREG;
 	cli();
@@ -206,7 +206,7 @@ void stepper_override_position(uint8_t axis, float mm)
 
 int stepper_get_direction(uint8_t axis)
 {
-	return (PORTD & (1<<(axis+5))) ? +1 : -1;
+	return (DIRECTION_PORT & (1<<(axis+X_DIRECTION_BIT))) ? +1 : -1;
 }
 
 bool stepper_is_moving(uint8_t axis)
@@ -264,7 +264,9 @@ ISR(TIMER1_COMPA_vect)
 
 		int32_t speed;
 		int32_t steps_to_full_speed= s->ramp_length;
-		if(steps_to_dest < steps_to_full_speed)
+		if(stepper_speed<STEPPER_MIN_SPEED)
+			speed= STEPPER_MIN_SPEED; // we may be asked to move slower than min speed, e.g. when seeking homes
+		else if(steps_to_dest < steps_to_full_speed)
 			speed= STEPPER_MIN_SPEED + ((stepper_speed-STEPPER_MIN_SPEED) * steps_to_dest) / steps_to_full_speed;
 		else
 		{

@@ -25,7 +25,7 @@
 #include "serial.h"
 
 #define POLOLU_DIRECTION_DELAY_US 1 // delay between setting direction and sending puls
-#define POLOLU_PULSE_DURATION_US  3 // length of pulse (1.9us for DRV8825 and 1us for A4988)
+#define POLOLU_PULSE_DURATION_US  3 // length of pulse (1.9us for DRV8825 and 1.0us for A4988)
 
 // Get the external stepper select value 0,1,2, and 3 for all axes simulteanously)
 #define MUX_SEL_GET_VALUE ((SEL_MUX_PIN & SEL_MUX_MASK)>>SEL_MUX_MASK_SHIFT)
@@ -36,7 +36,7 @@ void external_init()
 	CONTROL_DDR   &= ~(CONTROL_MASK); 		// Configure as input pins
 	CONTROL_PORT  |= CONTROL_MASK;  		// Enable internal pull-up resistors. Normal high operation.
 	CONTROL_PCMSK |= CONTROL_MASK;  		// Enable specific pins of the Pin Change Interrupt
-	PCICR         |= (1 << CONTROL_INT);    // Enable Pin Change Interrupt TODO: we may only need raising edge, not change!!
+	PCICR         |= (1 << CONTROL_INT);    // Enable Pin Change Interrupt TODO: use raising edge, not change, and set asynchronous duration ourselves?
 
 	SEL_MUX_DDR  &= ~SEL_MUX_MASK;			// Set as input pins
 	SEL_MUX_PORT &= ~SEL_MUX_MASK;			// Disable internal pull-ups (due to pin13 and its led)
@@ -56,8 +56,8 @@ void external_endstop(bool state)
 }
 
 // Pin change interrupt for pin-out commands, i.e. cycle start, feed hold, and reset. Sets
-// only the realtime command execute variable to have the main program execute these when 
-// its ready. This works exactly like the character-based realtime commands when picked off
+// only the real-time command execute variable to have the main program execute these when
+// its ready. This works exactly like the character-based real-time commands when picked off
 // directly from the incoming serial data stream.
 ISR(CONTROL_INT_vect) 
 {
@@ -69,15 +69,25 @@ ISR(CONTROL_INT_vect)
 	// serial_write( (pin & (1<<EXT_STEP_BIT)) ? 1 : 0 );
 
 	// Enter only if any CONTROL pin is detected as active.
-	// The master sent a step pulse
+
+	#ifdef AUTO_SWITCH_EXTERNAL
+		if(!external_mode)
+		{
+			STEPPERS_DISABLE_PORT &= ~(1<<STEPPERS_DISABLE_BIT); // ie.e.  stepper_power(true);
+			external_mode= 1; // automatically switches to external mode on the first external stimulus
+		}
+	#endif
+
+	// The master sent a step pulse (we're in external mode, aka slave mode "=E")
 	if(external_mode) // -- && (pin & (1<<EXT_STEP_BIT))
 	{
-		// only in "external mode" (=E, vs. default =C configuration mode)
+		// direction
 		if(CONTROL_PIN & (1<<EXT_DIR_BIT))
 			DIRECTION_ALL_ON();
 		else
 			DIRECTION_ALL_OFF();
 
+		// step pulse (grouped or individual)
 		uint8_t axis= MUX_SEL_GET_VALUE;
 		if(axis==SEL_MUX_AXIS_ALL) // ref. TRIBED_AXIS_xxx in Tribed Marlin
 		{
@@ -86,10 +96,12 @@ ISR(CONTROL_INT_vect)
 			else
 				STEPPER_ALL_CLEAR();
 		}
-		else // 0,1,2
+		else // individual axis 0,1 or 2
 		{
 			if(CONTROL_PIN & (1<<EXT_STEP_BIT))
+			{
 				STEPPER_SET();
+			}
 			else
 				STEPPER_CLEAR();
 		}
