@@ -37,7 +37,8 @@ D (digital pins 0 to 7)
 
 #define STEPPER_STEPS_TO_FULL_SPEED	1024	// number of stepper steps (i.e. distance) before it can reach full speed -- better use a power of two (faster)
 #define STEPPER_MIN_SPEED			30		// minimum safe speed for abrupt start and stop
-#define STEPPER_MAX_SPEED			200		// stepper full speed (max. increase to the accumulator on each interrupt)
+#define STEPPER_MAX_SPEED			140		// stepper full speed (max. increase to the accumulator on each interrupt)
+//#define STEPPER_MAX_SPEED			200		// stepper full speed (max. increase to the accumulator on each interrupt)
 #define FIXED_POINT_OVF				256		// (half) movement occurs when accumulator overshoots this value (higher or equal to STEPPER_MAX_SPEED)
 
 bool steppers_relative_mode= false;

@@ -358,6 +358,7 @@ bool run(const char* cmd/*= NULL*/)
 ;z<0-2> - zero origin\n\
 ;c<0-2> - calibrate\n\
 ;o<0-2,mm> - override position\n\
+;g<0-2> <mm> - move one axis\n\
 ;g<mm> - move bed\n");
 		return true;
 	}
@@ -499,16 +500,32 @@ bool run(const char* cmd/*= NULL*/)
 		return true;
 	}
 
-	if(cmd0=='g') // g<mm> : move to a position
+	if(cmd0=='g') // g<mm> or g<0-2> <mm>: move to a position
 	{
 		if(!enabled()) return false;
+		const char* p= cmd+1;
+		uint8_t axis=255;
+		if(*p>='0' && *p<='2' && *(p+1)==' ') // syntax variant g<axis> <mm>
+		{
+			axis= (*p-'0');
+			++p;
+			while(*p && *p==' ') ++p;
+		}
 		float pos;
-		const char* p= string_to_float(cmd+1, &pos);
+		p= string_to_float(p, &pos);
 		if(*p) goto badHeight;
 
-		if(move_modal(pos, speed_factor))
-			return true;
-
+		if(axis<3)
+		{
+			info("axis move!");
+			if(move_modal_axis(axis, pos, speed_factor))
+				return true;
+		}
+		else
+		{
+			if(move_modal(pos, speed_factor))
+				return true;
+		}
 		info("limit_hit");
 		steppers_zero_speed(); // we will restart at slow speed if "l0" is send (i.e. do not enforce limits)
 		return false;
