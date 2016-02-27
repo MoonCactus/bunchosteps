@@ -29,9 +29,10 @@ D (digital pins 0 to 7)
 #include "steppers.h"
 #include "limits.h"
 #include "serial.h"
+#include "external.h"
 
 #define STEPS_PER_MM				400		// how many steps for 1 mm (depends on stepper and microstep settings)
-#define ENFORCE_SHARED_LIMITS				// undefine to have the steppers check only their respective limit when moving (probably unsafe)
+#define MOVE_SHARE_LIMITS				// undefine to have the steppers check only their respective limit when moving (probably unsafe)
 
 #define BASE_TIMER_PERIOD			64		// how often the interrupt fires (clk * 8) -- at max speed, half a step can be made on each interrupt -- lowest possible
 
@@ -150,9 +151,6 @@ void steppers_zero_speed()
 
 bool stepper_set_target(uint8_t axis, float mm, float speed_factor)
 {
-	if(external_mode)
-		return false;
-
 	uint8_t sreg= SREG;
 	cli();
 
@@ -237,20 +235,9 @@ bool steppers_are_moving()
 ISR(TIMER1_COMPA_vect)
 {
 	if(nmi_reset) return;
-	if(external_mode) return; // steppers are commanded directly by the master
 	for(uint8_t stepper_index=0;stepper_index<3;++stepper_index)
 	{
 		volatile stepper_data* s = &steppers[stepper_index];
-
-#ifdef ENFORCE_SHARED_LIMITS
-		if(steppers_respect_endstop && sticky_limits)
-#else
-		if(steppers_respect_endstop && sticky_limit_is_hit(stepper_index))
-#endif
-		{
-			// s->target= s->position; // no move, and stop here
-			return;
-		}
 
 		int32_t position= s->position;
 		int32_t target= s->target;
@@ -259,6 +246,15 @@ ISR(TIMER1_COMPA_vect)
 		// How far are we from the target (absolute value)?
 		int32_t steps_to_dest= target - position;
 		if(steps_to_dest==0) continue; // already there
+
+		#ifdef MOVE_SHARE_LIMITS
+			if(steppers_respect_endstop && sticky_limits)
+				return;
+		#else
+			if(steppers_respect_endstop && sticky_limit_is_hit(stepper_index))
+				return;
+		#endif
+
 		uint8_t positive= (steps_to_dest>0) ? 1 : 0;
 		if(!positive) steps_to_dest= -steps_to_dest; // the stepper direction was already set during stepper_set_target()
 
@@ -329,5 +325,3 @@ void set_origin_single(uint8_t axis)
 	stepper_zero(axis);
 	sticky_limits &= ~(1<<(axis+1));
 }
-
-

@@ -42,6 +42,7 @@ http://gammon.com.au/interrupts
 #include "commands.h"
 #include "external.h"
 
+#include <avr/eeprom.h>
 // ======================= Main =======================
 
 int main(void)
@@ -49,6 +50,7 @@ int main(void)
 	// Initialize system upon power-up.
 	cli();
 	serial_init();   // Setup serial baud rate and interrupts
+	load_axes_offsets();
 	limits_init();
 	stepper_init();
 	external_init();
@@ -95,7 +97,6 @@ int main(void)
 		// Must be in its own block!
 		{
 			print_pstr(";RESET\n");
-			external_mode= 0;
 			steppers_relative_mode= false;
 			set_origin(); // ... not sure it is a good idea though
 			delay_ms(10);
@@ -106,7 +107,6 @@ int main(void)
 			print_pstr("$RESET\n");
 			#ifdef DEFAULTS_TO_EXTERNAL_MODE
 				stepper_power(true);
-				external_mode= 1; // defaults to external mode
 			#endif
 		}
 	}

@@ -43,6 +43,10 @@ void external_init()
 
 	EXT_ENDSTOP_DDR |= (1 << EXT_ENDSTOP_BIT);
 	external_endstop(false);
+
+#ifdef DEFAULTS_TO_EXTERNAL_MODE
+	stepper_power(true);
+#endif
 }
 
 
@@ -66,45 +70,31 @@ ISR(CONTROL_INT_vect)
 		pin ^= CONTROL_INVERT_MASK;
 	#endif
 
-	// serial_write( (pin & (1<<EXT_STEP_BIT)) ? 1 : 0 );
+	// The master sent a step pulse
 
-	// Enter only if any CONTROL pin is detected as active.
-
-	#ifdef AUTO_SWITCH_EXTERNAL
-		if(!external_mode)
-		{
-			STEPPERS_DISABLE_PORT &= ~(1<<STEPPERS_DISABLE_BIT); // ie.e.  stepper_power(true);
-			external_mode= 1; // automatically switches to external mode on the first external stimulus
-		}
-	#endif
-
-	// The master sent a step pulse (we're in external mode, aka slave mode "=E")
-	if(external_mode) // -- && (pin & (1<<EXT_STEP_BIT))
-	{
 		// direction
-		if(CONTROL_PIN & (1<<EXT_DIR_BIT))
-			DIRECTION_ALL_ON();
-		else
-			DIRECTION_ALL_OFF();
+	if(CONTROL_PIN & (1<<EXT_DIR_BIT))
+		DIRECTION_ALL_ON();
+	else
+		DIRECTION_ALL_OFF();
 
-		// step pulse (grouped or individual)
-		uint8_t axis= MUX_SEL_GET_VALUE;
-		if(axis==SEL_MUX_AXIS_ALL) // ref. TRIBED_AXIS_xxx in Tribed Marlin
+	// step pulse (grouped or individual)
+	uint8_t axis= MUX_SEL_GET_VALUE;
+	if(axis==SEL_MUX_AXIS_ALL) // ref. TRIBED_AXIS_xxx in Tribed Marlin
+	{
+		if(CONTROL_PIN & (1<<EXT_STEP_BIT))
+			STEPPER_ALL_SET();
+		else
+			STEPPER_ALL_CLEAR();
+	}
+	else // individual axis 0,1 or 2
+	{
+		if(CONTROL_PIN & (1<<EXT_STEP_BIT))
 		{
-			if(CONTROL_PIN & (1<<EXT_STEP_BIT))
-				STEPPER_ALL_SET();
-			else
-				STEPPER_ALL_CLEAR();
+			STEPPER_SET();
 		}
-		else // individual axis 0,1 or 2
-		{
-			if(CONTROL_PIN & (1<<EXT_STEP_BIT))
-			{
-				STEPPER_SET();
-			}
-			else
-				STEPPER_CLEAR();
-		}
+		else
+			STEPPER_CLEAR();
 	}
 }
 

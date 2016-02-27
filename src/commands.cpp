@@ -11,30 +11,54 @@
 #include "limits.h"
 #include "serial.h"
 #include "steppers.h"
+#include "external.h"
+#include <avr/eeprom.h>
 
 #define EPSILON_POS				0.01	// calibration is considered OK when diff is below with value
 
 #define HOME_SEEK_UP_MM			400.0	// bed may start completely at the bottom
 #define SEEK_DOWN_RATIO			1		// how fast to retract (limits are ignored anyway)
-#define SEEK_DOWN_SETTLE_MS		400		// time to wait before seeking up again slowly
+#define SEEK_DOWN_SETTLE_LONG_MS		1000		// initial time to wait before seeking up first time
+#define SEEK_DOWN_SETTLE_SHORT_MS		250		// time to wait before seeking up again slowly
 #define HOME_SEEK_COARSE_RATIO	0.4		// how fast to seek (first pass)
 #define HOME_SEEK_FINE_RATIO	0.1		// how fast to seek (second pass)
 
 #define CALIBRATION_PRE_SEEK_MM	1.0		// retract after coarse look up
-#define CALIBRATION_SEEK_MM		2.0	// how far to detach an axis before it is calibrated
+#define CALIBRATION_SEEK_MM		2.0		// how far to detach an axis before it is calibrated
 
 // Temporary modes: make sure to check your scope for these automatic status/instances!
-#define TEMP_RELATIVE_MODE		Backup<bool> sam(steppers_relative_mode, true)
-#define TEMP_ABSOLUTE_MODE		Backup<bool> sam(steppers_relative_mode, false)
-#define TEMP_IGNORE_LIMITS 		Backup<volatile bool> sre(steppers_respect_endstop,false);
+#define TEMP_RELATIVE_MODE		Backup<bool> _trm(steppers_relative_mode, true)
+#define TEMP_ABSOLUTE_MODE		Backup<bool> _tam(steppers_relative_mode, false)
+#define TEMP_USE_LIMITS 		Backup<volatile bool> _tul(steppers_respect_endstop,true);
+#define TEMP_IGNORE_LIMITS 		Backup<volatile bool> _til(steppers_respect_endstop,false);
 
-/*extern*/ uint8_t external_mode= 0;
+#define EEPROM_AXES_OFFSETS_ADDR 64
 
 static char cmd_buf[32];
 static uint8_t cmd_len= 0;
 static float speed_factor= 1.0;
 
+float axis_offsets[3];
+
+
 void cmd_show_status();
+
+void load_axes_offsets()
+{
+	const float *a= (const float *)EEPROM_AXES_OFFSETS_ADDR;
+	axis_offsets[0]= eeprom_read_float(a++);
+	axis_offsets[1]= eeprom_read_float(a++);
+	axis_offsets[2]= eeprom_read_float(a);
+}
+
+void save_axes_offsets()
+{
+	float *a= (float *)EEPROM_AXES_OFFSETS_ADDR;
+	eeprom_write_float(a++, axis_offsets[0]);
+	eeprom_write_float(a++, axis_offsets[1]);
+	eeprom_write_float(a++, axis_offsets[2]);
+}
+
 
 bool error(const char* cmd)
 {
@@ -70,6 +94,8 @@ void info_axis(int axis)
 	print_float( stepper_get_position(axis) );
 	print_string(",L");
 	print_char(sticky_limit_is_hit(axis)?'1':'0');
+	print_string(",o");
+	print_float(axis_offsets[axis]);
 	print_char('\n');
 	delay_ms(10);
 }
@@ -85,20 +111,44 @@ bool success(const char* cmd)
 
 // ======================= helpers =======================
 
+bool force_movement(char axis_letter=0)
+{
+	steppers_zero_speed(); // make sure steppers restart at low speed
+	if(!axis_letter)
+	{
+		sticky_limits= 0;
+		return true;
+	}
+	uint8_t axis= (axis_letter-'0');
+	if(axis>2) return false;
+	sticky_limits &= ~(1<<axis);
+	return true;
+}
+
+
 /**
  * Move bed down until sensors are no more activated.
  * The usual context is to call this *immediately* after homing up and before setting home with z
  */
 bool down_detach()
 {
-	// TODO: change movement to be short sequences of [down/up/down] to avoid sensor saturation
-	TEMP_IGNORE_LIMITS; // else no movement will be done
 	TEMP_RELATIVE_MODE;
-	sticky_limits= 0;
-	if(limits_get_rt_states()) stepper_set_targets(5, 0.01); // very slow asynchronous call: just to detach the bed from the tool head
-	while(limits_get_rt_states() && steppers_are_moving() && !nmi_reset); // TODO: add length limit!
-	steppers_settle_here(); // stop all movement asap
-	return !limits_get_rt_states();
+	TEMP_IGNORE_LIMITS; // else no movement may be done ("sticky_limits"
+	for(uint8_t pass=0;pass<3;++pass)
+	{
+		sticky_limits= 0; delay_ms(100); // this is to catch any bouncing limits
+		if(limits_get_rt_states() || sticky_limits)
+		{
+			stepper_set_targets(5, 0.01); // very slow asynchronous call: just to detach the bed from the tool head
+			//while(limits_get_rt_states() && steppers_are_moving() && !nmi_reset); // TODO: add length limit!
+			while(limits_get_rt_states() && steppers_are_moving() && !nmi_reset); // TODO: add length limit!
+
+			steppers_settle_here(); // stop all movement asap
+		}
+	}
+
+	sticky_limits= limits_get_rt_states();
+	return(!sticky_limits);
 }
 
 bool down_detach_single(uint8_t axis)
@@ -106,13 +156,26 @@ bool down_detach_single(uint8_t axis)
 	// TODO: change movement to be short sequences of [down/up/down] to avoid sensor saturation
 	TEMP_IGNORE_LIMITS; // else no movement will be done
 	TEMP_RELATIVE_MODE;
-	sticky_limits &= ~(1<<axis);
 
-	if(limits_get_rt_states()&(1<<axis)) stepper_set_target(axis, 5, 0.01); // asynchronous call: down slowly, just to detach the bed from the tool head
-	while((limits_get_rt_states()&(1<<axis)) && stepper_is_moving(axis) && !nmi_reset);
-	stepper_settle_here(axis); // stop all movement asap
+	while( (limits_get_rt_states() & (1<<axis)) )
+	{
+		// clear the limit
+		sticky_limits &= ~(1<<axis);
+		stepper_set_target(axis, 1, 0.01); // asynchronous call: down slowly, just to detach the bed from the tool head
+		while((limits_get_rt_states()&(1<<axis)) && stepper_is_moving(axis) && !nmi_reset);
+		stepper_settle_here(axis); // stop all movement asap
+		delay_ms(100);
+	}
 
-	return !(limits_get_rt_states() & (1<<axis));
+	// Now, apply axis-specific retraction
+	if(axis==0)
+		move_modal_axis(axis, axis_offsets[axis], 1);
+	else
+		move_modal_axis(axis, axis_offsets[axis] + axis_offsets[0], 1);
+	force_movement(axis);
+
+	bool r=!(limits_get_rt_states() & (1<<axis));
+	return r;
 }
 
 // Detect bed upwards and retract a little to detach from the sensor
@@ -124,7 +187,8 @@ bool detect_up(float speed)
 	move_modal(-HOME_SEEK_UP_MM, speed); // slow upwards (we're expecting to trigger one or many end stops)
 	steppers_settle_here();
 	bool ret= (sticky_limits!=0); // positive when sticky_limits is enabled
-	down_detach(); delay_ms(100); down_detach();
+
+	down_detach();
 	return ret;
 }
 
@@ -135,9 +199,10 @@ bool detect_up_axis(uint8_t axis, float speed)
 	// Up by 20 (expecting to hit the limits, head is in the center of the bed, bed is approximately flat -- as always!)
 	sticky_limits= 0;
 	move_modal_axis(axis, -CALIBRATION_SEEK_MM, speed); // slow upwards. We're expecting to trigger at least one end stop
+
 	stepper_settle_here(axis);
 	bool ret= ((sticky_limits&(1<<axis))!=0); // we want this axis to hit the limit
-	down_detach_single(axis); delay_ms(100); down_detach_single(axis);
+	down_detach_single(axis);
 	return ret;
 }
 
@@ -152,11 +217,6 @@ void cmd_show_status()
 		info("pon");
 	else
 		info("poff");
-
-	if(external_mode)
-		info("ext");
-	else
-		info("cal");
 
 	if(steppers_relative_mode)
 		info("rel");
@@ -177,15 +237,9 @@ void cmd_show_status()
 	print_pstr("\n");
 
 	for(uint8_t axis=0; axis<3; ++axis)
-	{
-		print_pstr(";");
-		print_char('X'+axis);
-		print_char('=');
-		print_float(stepper_get_position(axis));
-		print_pstr("\n");
-	}
+		info_axis(axis);
 
-	// print_pstr(";ram="); print_integer(get_free_memory()); print_char('\n');
+	//print_pstr(";ram="); print_integer(get_free_memory()); print_char('\n');
 
 }
 
@@ -197,11 +251,15 @@ bool cmd_home_center()
 	TEMP_RELATIVE_MODE;
 	limits_enable();
 
-	// Coarse upwards (first home seek at medium speed)
 	{
-		info("h/coarse");
-		if(!detect_up(HOME_SEEK_COARSE_RATIO)) goto failToDetectUpwards;
+		TEMP_IGNORE_LIMITS;
+		move_modal(CALIBRATION_PRE_SEEK_MM, SEEK_DOWN_RATIO);
+		delay_ms(SEEK_DOWN_SETTLE_LONG_MS); // stabilize dynamic sensors
 	}
+
+	// Coarse upwards (first home seek at medium speed)
+	info("h/coarse");
+	if(!detect_up(HOME_SEEK_COARSE_RATIO)) goto failToDetectUpwards;
 
 	// Down by a little bit again to redo a finer seek
 	{
@@ -209,7 +267,7 @@ bool cmd_home_center()
 		move_modal(CALIBRATION_PRE_SEEK_MM, SEEK_DOWN_RATIO);
 		// TODO: we should be able to reset the sensor module (so as to forget the pressure event),
 		// It is better than pausing like this:
-		delay_ms(SEEK_DOWN_SETTLE_MS);
+		delay_ms(SEEK_DOWN_SETTLE_SHORT_MS);
 	}
 
 	// Upwards again, but slower
@@ -220,6 +278,13 @@ bool cmd_home_center()
 
 	// Finalize
 	info("h/origin");
+
+	// Apply offset using axes 0 which is the reference (we're assuming we are homing over sensor #0!)
+	// The offsets of axes 1 and 2 are applied only during calibration.
+	move_modal(axis_offsets[0], 1);
+	force_movement();
+
+
 	set_origin();
 	delay_ms(10);
 	sticky_limits= 0;
@@ -239,7 +304,11 @@ bool cmd_calibrate_axis(uint8_t axis)
 	limits_enable();
 
 	if(axis==0)
-		return cmd_home_center(); // axis zero is the reference, so calibrating axis zero is equivalent to homing + set origin
+	{
+		bool r= cmd_home_center(); // axis zero is the reference, so calibrating axis zero is equivalent to homing + set origin
+		down_detach_single(0);
+		return r;
+	}
 
 	// Grouped coarse upwards (aka homing without setting origins)
 	{
@@ -251,7 +320,7 @@ bool cmd_calibrate_axis(uint8_t axis)
 	{
 		TEMP_IGNORE_LIMITS;
 		move_modal_axis(axis, CALIBRATION_PRE_SEEK_MM, SEEK_DOWN_RATIO);
-		delay_ms(SEEK_DOWN_SETTLE_MS); // add enough time for the sensors to forget the last pressure level
+		delay_ms(SEEK_DOWN_SETTLE_LONG_MS); // add enough time for the sensors to forget the last pressure level
 	}
 
 	// Seek end stop upwards for this axis
@@ -273,7 +342,6 @@ failure:
 	nmi_reset= true; // hard failure: calibration is vital
 	return false;
 }
-
 
 // ======================= Command interpreter =======================
 
@@ -341,6 +409,7 @@ bool enabled()
 	return true;
 }
 
+
 bool run(const char* cmd/*= NULL*/)
 {
 	char cmd0= cmd[0];
@@ -357,11 +426,10 @@ bool run(const char* cmd/*= NULL*/)
 ;m<R|A> - relative/absolute\n\
 ;x<0-2> - clear limits\n\
 ;l<0|1> - respect limits\n\
-;d<0-2> - detach from limits\n\
 ;h - main home\n\
 ;z<0-2> - zero origin\n\
 ;c<0-2> - calibrate\n\
-;o<0-2,mm> - override position\n\
+;o<0-2,mm> - record axis offset\n\
 ;g<0-2> <mm> - move one axis\n\
 ;g<mm> - move bed\n");
 		return true;
@@ -389,17 +457,6 @@ bool run(const char* cmd/*= NULL*/)
 	}
 
 	// ---------------------------------------------------------------------------------------- config
-
-	if(cmd0=='=') // =<C|E> - configuration/external drive. Transparent just transmits dir/steps from input pins.
-	{
-		if(cmd1 && !cmd[2])
-		{
-			if(cmd1=='C')	{ external_mode= 0; return true; }
-			if(cmd1=='E')	{ stepper_power(true); /*steppers_settle_here();*/ external_mode= 1; return true; }
-		}
-		info("C|E?");
-		return false;
-	}
 
 	if(cmd0=='p') // p<0|1> - stepper power
 	{
@@ -466,26 +523,9 @@ bool run(const char* cmd/*= NULL*/)
 
 	if(cmd0=='x') // x or x<0-2> - clear sticky limits and force/resume movement if any (dangerous)
 	{
-		steppers_zero_speed(); // make sure steppers restart at low speed
-		if(!cmd1)
-		{
-			sticky_limits= 0;
-			return true;
-		}
-		uint8_t axis= (cmd1-'0');
-		if(axis>2) goto badAxis;
-		sticky_limits &= ~(1<<axis);
+		if(!force_movement(cmd1))
+			goto badAxis;
 		return true;
-	}
-
-	if(cmd0=='d') // d or d<0-2> - detach from limits by moving down
-	{
-		if(!enabled()) return false;
-		if(!cmd1)
-			return(down_detach());
-		uint8_t axis= (cmd1-'0');
-		if(axis>2) goto badAxis;
-		return down_detach_single(axis);
 	}
 
 	// ---------------------------------------------------------------------------------------- movement: bed height
@@ -534,16 +574,34 @@ bool run(const char* cmd/*= NULL*/)
 		return false;
 	}
 
-	if(cmd0=='o') // o<0-2=mm> : override axis position
+	if(cmd0=='o') // o<0-2=mm> : add an individual axis offset
 	{
 		uint8_t axis= (cmd1-'0');
 		if(axis>2) goto badAxis;
 		cmd+=2;
 		while(*cmd && *cmd!='-' && *cmd!='.' && (*cmd<'0' || *cmd>'9')) ++cmd;
-		float new_position;
-		const char* p= string_to_float(cmd, &new_position);
+		float new_offset;
+		const char* p= string_to_float(cmd, &new_offset);
 		if(*p) goto badHeight;
-		stepper_override_position(axis, new_position);
+
+		// Update the axis offset and save it in the EEPROM
+		axis_offsets[axis]+= new_offset;
+		if(axis==0) // the reference shifts all axes (finish offsetting with it!)
+		{
+			axis_offsets[1]+= new_offset;
+			axis_offsets[2]+= new_offset;
+		}
+		save_axes_offsets();
+
+		// Shift the position, but keep the same recorded value
+		stepper_override_position(axis, stepper_get_position(axis) - new_offset);
+		if(axis==0)
+		{
+			stepper_override_position(1, stepper_get_position(1) - new_offset);
+			stepper_override_position(2, stepper_get_position(2) - new_offset);
+		}
+
+		// Show this axis state
 		info_axis(axis);
 		return true;
 	}
