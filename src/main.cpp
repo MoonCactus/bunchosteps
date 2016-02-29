@@ -49,6 +49,7 @@ int main(void)
 {
 	// Initialize system upon power-up.
 	cli();
+	millis_init();
 	serial_init();   // Setup serial baud rate and interrupts
 	load_axes_offsets();
 	limits_init();
@@ -80,7 +81,6 @@ int main(void)
 		{
 			if(command_collect())
 				command_execute();
-
 			if(++c==0)
 			{
 				serial_write(';');
