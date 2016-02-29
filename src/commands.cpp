@@ -14,25 +14,28 @@
 #include "external.h"
 #include <avr/eeprom.h>
 
-#define EPSILON_POS				0.01	// calibration is considered OK when diff is below with value
+#define EPSILON_POS					0.01	// calibration is considered OK when diff is below with value
 
-#define HOME_SEEK_UP_MM			400.0	// bed may start completely at the bottom
-#define SEEK_DOWN_RATIO			1		// how fast to retract (limits are ignored anyway)
-#define SEEK_DOWN_SETTLE_LONG_MS		400		// initial time to wait before seeking up first time
-#define SEEK_DOWN_SETTLE_SHORT_MS		150		// time to wait before seeking up again slowly
-#define HOME_SEEK_COARSE_RATIO	0.4		// how fast to seek (first pass)
-#define HOME_SEEK_FINE_RATIO	0.1		// how fast to seek (second pass)
+#define HOME_SEEK_UP_MM				400.0	// bed may start completely at the bottom
+#define CALIBRATION_PRE_SEEK_MM		1.5		// retract after coarse look up
+#define CALIBRATION_SEEK_MM			2.0		// how far to detach an axis before it is calibrated
 
-#define CALIBRATION_PRE_SEEK_MM	1.0		// retract after coarse look up
-#define CALIBRATION_SEEK_MM		2.0		// how far to detach an axis before it is calibrated
+#define SEEK_DOWN_RATIO				1		// how fast to retract (limits are ignored anyway)
+#define SEEK_DOWN_SETTLE_HOME_MS	200		// time to wait in low state before homing (make sure the end stops are off)
+#define SEEK_DOWN_SETTLE_LONG_MS	400		// initial time to wait before seeking up first time
+#define SEEK_DOWN_SETTLE_SHORT_MS	150		// time to wait before seeking up again slowly
+
+#define HOME_SEEK_COARSE_RATIO		0.5		// how fast to seek (first pass)
+#define HOME_SEEK_FINE_RATIO		0.005		// how fast to seek (second pass)
+
 
 // Temporary modes: make sure to check your scope for these automatic status/instances!
-#define TEMP_RELATIVE_MODE		Backup<bool> _trm(steppers_relative_mode, true)
-#define TEMP_ABSOLUTE_MODE		Backup<bool> _tam(steppers_relative_mode, false)
-#define TEMP_USE_LIMITS 		Backup<volatile bool> _tul(steppers_respect_endstop,true);
-#define TEMP_IGNORE_LIMITS 		Backup<volatile bool> _til(steppers_respect_endstop,false);
+#define TEMP_RELATIVE_MODE			Backup<bool> _trm(steppers_relative_mode, true)
+#define TEMP_ABSOLUTE_MODE			Backup<bool> _tam(steppers_relative_mode, false)
+#define TEMP_USE_LIMITS 			Backup<volatile bool> _tul(steppers_respect_endstop,true);
+#define TEMP_IGNORE_LIMITS 			Backup<volatile bool> _til(steppers_respect_endstop,false);
 
-#define EEPROM_AXES_OFFSETS_ADDR 64
+#define EEPROM_AXES_OFFSETS_ADDR	64
 
 static char cmd_buf[32];
 static uint8_t cmd_len= 0;
@@ -250,7 +253,7 @@ bool cmd_home_origin()
 	{
 		TEMP_IGNORE_LIMITS;
 		move_modal(CALIBRATION_PRE_SEEK_MM, SEEK_DOWN_RATIO);
-		delay_ms(SEEK_DOWN_SETTLE_LONG_MS); // stabilize dynamic sensors
+		delay_ms(SEEK_DOWN_SETTLE_HOME_MS); // stabilize dynamic sensors
 	}
 
 	// Coarse upwards (first home seek at medium speed)
@@ -292,7 +295,7 @@ failToDetectUpwards:
 // ======================= One axis only =======================
 
 
-bool cmd_calibrate_axis(uint8_t axis)
+bool cmd_calibrate_axis(uint8_t axis, bool slow_but_safe)
 {
 	TEMP_RELATIVE_MODE;
 	limits_enable();
@@ -300,6 +303,7 @@ bool cmd_calibrate_axis(uint8_t axis)
 	if(axis==0) // axis zero is the reference in any case, so calibration is
 		return cmd_home_origin(); // equivalent to homing + set origin
 
+	if(slow_but_safe)
 	{
 		TEMP_IGNORE_LIMITS;
 		move_modal(CALIBRATION_PRE_SEEK_MM, SEEK_DOWN_RATIO);
@@ -316,7 +320,7 @@ bool cmd_calibrate_axis(uint8_t axis)
 	{
 		TEMP_IGNORE_LIMITS;
 		move_modal_axis(axis, CALIBRATION_PRE_SEEK_MM, SEEK_DOWN_RATIO);
-		delay_ms(SEEK_DOWN_SETTLE_LONG_MS); // add enough time for the sensors to forget the last pressure level
+		delay_ms(slow_but_safe ? SEEK_DOWN_SETTLE_LONG_MS : SEEK_DOWN_SETTLE_SHORT_MS); // add enough time for the sensors to forget the last pressure level
 	}
 
 	// Seek end stop upwards for this axis
@@ -537,12 +541,20 @@ bool run(const char* cmd/*= NULL*/)
 		return cmd_home_origin();
 	}
 
-	if(cmd0=='c') // c<0-2> - calibrate
+	if(cmd0=='c') // c<0-2> - calibrate (safe)
 	{
 		uint8_t axis= (cmd1-'0');
 		if(axis>2) goto badAxis;
 		stepper_power(true); // one way to boot up the steppers
-		return cmd_calibrate_axis(axis);
+		return cmd_calibrate_axis(axis, true);
+	}
+
+	if(cmd0=='C') // C<0-2> - calibrate (quick)
+	{
+		uint8_t axis= (cmd1-'0');
+		if(axis>2) goto badAxis;
+		stepper_power(true); // one way to boot up the steppers
+		return cmd_calibrate_axis(axis, false);
 	}
 
 	if(cmd0=='x') // x or x<0-2> - clear sticky limits and force/resume movement if any (dangerous)
