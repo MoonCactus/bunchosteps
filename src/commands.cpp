@@ -25,8 +25,8 @@
 #define SEEK_DOWN_SETTLE_LONG_MS	400		// initial time to wait before seeking up first time
 #define SEEK_DOWN_SETTLE_SHORT_MS	150		// time to wait before seeking up again slowly
 
-#define HOME_SEEK_COARSE_RATIO		0.5		// how fast to seek (first pass)
-#define HOME_SEEK_FINE_RATIO		0.005		// how fast to seek (second pass)
+#define HOME_SEEK_COARSE_RATIO		0.8		// how fast to seek (first pass)
+#define HOME_SEEK_FINE_RATIO		0.1		// how fast to seek (second pass)
 
 
 // Temporary modes: make sure to check your scope for these automatic status/instances!
@@ -245,15 +245,16 @@ void cmd_show_status()
 /**
  * 3-way simultaneous homing and origin ("standard homing", may occur after calibration)
  */
-bool cmd_home_origin()
+bool cmd_home_origin(bool slow_but_safe)
 {
 	TEMP_RELATIVE_MODE;
 	limits_enable();
 
+	if(slow_but_safe)
 	{
 		TEMP_IGNORE_LIMITS;
 		move_modal(CALIBRATION_PRE_SEEK_MM, SEEK_DOWN_RATIO);
-		delay_ms(SEEK_DOWN_SETTLE_HOME_MS); // stabilize dynamic sensors
+		delay_ms(slow_but_safe ? SEEK_DOWN_SETTLE_HOME_MS : SEEK_DOWN_SETTLE_SHORT_MS); // stabilize dynamic sensors
 	}
 
 	// Coarse upwards (first home seek at medium speed)
@@ -301,7 +302,7 @@ bool cmd_calibrate_axis(uint8_t axis, bool slow_but_safe)
 	limits_enable();
 
 	if(axis==0) // axis zero is the reference in any case, so calibration is
-		return cmd_home_origin(); // equivalent to homing + set origin
+		return cmd_home_origin(slow_but_safe); // equivalent to homing + set origin
 
 	if(slow_but_safe)
 	{
@@ -538,7 +539,14 @@ bool run(const char* cmd/*= NULL*/)
 	{
 		if(cmd1) return false;
 		stepper_power(true); // one way to boot up the steppers
-		return cmd_home_origin();
+		return cmd_home_origin(true);
+	}
+
+	if(cmd0=='h') // H - homing (quick)
+	{
+		if(cmd1) return false;
+		stepper_power(true); // one way to boot up the steppers
+		return cmd_home_origin(false);
 	}
 
 	if(cmd0=='c') // c<0-2> - calibrate (safe)

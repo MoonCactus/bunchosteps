@@ -37,8 +37,8 @@ D (digital pins 0 to 7)
 #define BASE_TIMER_PERIOD			64		// how often the interrupt fires (clk * 8) -- at max speed, half a step can be made on each interrupt -- lowest possible
 
 #define STEPPER_STEPS_TO_FULL_SPEED	1024	// (512) number of stepper steps (i.e. distance) before it can reach full speed -- better use a power of two (faster)
-#define STEPPER_MIN_SPEED			45		// (45) minimum safe speed for abrupt start and stop
-#define STEPPER_MAX_SPEED			400		// (400) stepper full speed (max. increase to the accumulator on each interrupt)
+#define STEPPER_MIN_SPEED			35		// (45) minimum safe speed for abrupt start and stop
+#define STEPPER_MAX_SPEED			350		// (400) stepper full speed (max. increase to the accumulator on each interrupt)
 #define FIXED_POINT_OVF				256		// (half) movement occurs when accumulator overshoots this value (higher or equal to STEPPER_MAX_SPEED)
 
 bool steppers_relative_mode= false;
