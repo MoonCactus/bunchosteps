@@ -14,20 +14,17 @@
 #include "external.h"
 #include <avr/eeprom.h>
 
-#define EPSILON_POS					0.01	// calibration is considered OK when diff is below with value
+#define SEEK_COARSE_SPEED_RATIO		0.8		// how fast to seek (first pass)
+#define SEEK_COARSE_LENGTH_MM		400.0	// bed may start completely at the bottom
 
-#define HOME_SEEK_UP_MM				400.0	// bed may start completely at the bottom
-#define CALIBRATION_PRE_SEEK_MM		1.5		// retract after coarse look up
-#define CALIBRATION_SEEK_MM			2.0		// how far to detach an axis before it is calibrated
+#define SEEK_FINE_SPEED_RATIO		0.1		// how fast to seek (second pass)
+#define SEEK_FINE_LENGTH_MM			2.0		// retract after coarse look up and before fine look up
 
 #define SEEK_DOWN_RATIO				1		// how fast to retract (limits are ignored anyway)
+
 #define SEEK_DOWN_SETTLE_HOME_MS	200		// time to wait in low state before homing (make sure the end stops are off)
 #define SEEK_DOWN_SETTLE_LONG_MS	400		// initial time to wait before seeking up first time
 #define SEEK_DOWN_SETTLE_SHORT_MS	150		// time to wait before seeking up again slowly
-
-#define HOME_SEEK_COARSE_RATIO		0.8		// how fast to seek (first pass)
-#define HOME_SEEK_FINE_RATIO		0.1		// how fast to seek (second pass)
-
 
 // Temporary modes: make sure to check your scope for these automatic status/instances!
 #define TEMP_RELATIVE_MODE			Backup<bool> _trm(steppers_relative_mode, true)
@@ -143,9 +140,7 @@ bool down_detach()
 		if(limits_get_rt_states() || sticky_limits)
 		{
 			stepper_set_targets(5, 0.01); // very slow asynchronous call: just to detach the bed from the tool head
-			//while(limits_get_rt_states() && steppers_are_moving() && !nmi_reset); // TODO: add length limit!
-			while(limits_get_rt_states() && steppers_are_moving() && !nmi_reset); // TODO: add length limit!
-
+			while(limits_get_rt_states() && steppers_are_moving() && !nmi_reset);
 			steppers_settle_here(); // stop all movement asap
 		}
 	}
@@ -175,13 +170,13 @@ bool down_detach_single(uint8_t axis)
 }
 
 // Detect all bed upwards and retract a little to detach from the sensor
-bool detect_up(float speed)
+bool detect_up(float speed, float length_upwards)
 {
 	TEMP_RELATIVE_MODE;
 
 	// Up by 20 (expecting to hit the limits, head is in the center of the bed, bed is approximately flat -- as always!)
 	sticky_limits= 0;
-	move_modal(-HOME_SEEK_UP_MM, speed); // slow upwards (we're expecting to trigger one or many end stops)
+	move_modal(-length_upwards, speed); // slow upwards (we're expecting to trigger one or many end stops)
 	steppers_settle_here();
 	bool ret= (sticky_limits!=0); // positive when sticky_limits is enabled
 
@@ -190,14 +185,14 @@ bool detect_up(float speed)
 }
 
 // Detect bed upwards and retract a little to detach from the sensor
-bool detect_up_axis(uint8_t axis, float speed, float length=CALIBRATION_SEEK_MM)
+bool detect_up_axis(uint8_t axis, float speed, float length_upwards)
 {
 	TEMP_RELATIVE_MODE;
 	TEMP_USE_LIMITS;
 	// Up by 20 (expecting to hit the limits, head is in the center of the bed, bed is approximately flat -- as always!)
 
 	sticky_limits= 0;
-	move_modal_axis(axis, -length, speed); // slow upwards. We're expecting to trigger at least one end stop
+	move_modal_axis(axis, -length_upwards, speed); // slow upwards. We're expecting to trigger at least one end stop
 
 	stepper_settle_here(axis);
 	bool ret= ((sticky_limits&(1<<axis))!=0); // we want this axis to hit the limit
@@ -253,18 +248,18 @@ bool cmd_home_origin(bool slow_but_safe)
 	if(slow_but_safe)
 	{
 		TEMP_IGNORE_LIMITS;
-		move_modal(CALIBRATION_PRE_SEEK_MM, SEEK_DOWN_RATIO);
+		move_modal(SEEK_FINE_LENGTH_MM, SEEK_DOWN_RATIO);
 		delay_ms(slow_but_safe ? SEEK_DOWN_SETTLE_HOME_MS : SEEK_DOWN_SETTLE_SHORT_MS); // stabilize dynamic sensors
 	}
 
-	// Coarse upwards (first home seek at medium speed)
+	// Long, coarse upwards seek (first home seek at high speed)
 	info("h/coarse");
-	if(!detect_up(HOME_SEEK_COARSE_RATIO)) goto failToDetectUpwards;
+	if(!detect_up(SEEK_COARSE_SPEED_RATIO, SEEK_COARSE_LENGTH_MM)) goto failToDetectUpwards;
 
 	// Down by a little bit again to redo a finer seek
 	{
 		TEMP_IGNORE_LIMITS;
-		move_modal(CALIBRATION_PRE_SEEK_MM, SEEK_DOWN_RATIO);
+		move_modal(SEEK_FINE_LENGTH_MM, SEEK_DOWN_RATIO);
 		// TODO: we should be able to reset the sensor module (so as to forget the pressure event),
 		// It is better than pausing like this:
 		delay_ms(SEEK_DOWN_SETTLE_SHORT_MS);
@@ -273,7 +268,7 @@ bool cmd_home_origin(bool slow_but_safe)
 	// Upwards again, but slower
 	{
 		info("h/fine");
-		if(!detect_up(HOME_SEEK_FINE_RATIO)) goto failToDetectUpwards;
+		if(!detect_up(SEEK_FINE_SPEED_RATIO, SEEK_FINE_LENGTH_MM+0.5)) goto failToDetectUpwards;
 	}
 
 	// Finalize
@@ -307,27 +302,27 @@ bool cmd_calibrate_axis(uint8_t axis, bool slow_but_safe)
 	if(slow_but_safe)
 	{
 		TEMP_IGNORE_LIMITS;
-		move_modal(CALIBRATION_PRE_SEEK_MM, SEEK_DOWN_RATIO);
+		move_modal(SEEK_FINE_LENGTH_MM, SEEK_DOWN_RATIO);
 		delay_ms(SEEK_DOWN_SETTLE_LONG_MS); // stabilize dynamic sensors
 	}
 
 	// Grouped coarse upwards (aka homing without setting origins)
 	{
 		info("cn/common");
-		if(!detect_up(HOME_SEEK_COARSE_RATIO)) goto failure;
+		if(!detect_up(SEEK_COARSE_SPEED_RATIO, SEEK_COARSE_LENGTH_MM)) goto failure;
 	}
 
 	// Lower the individual axis slightly
 	{
 		TEMP_IGNORE_LIMITS;
-		move_modal_axis(axis, CALIBRATION_PRE_SEEK_MM, SEEK_DOWN_RATIO);
+		move_modal_axis(axis, SEEK_FINE_LENGTH_MM, SEEK_DOWN_RATIO);
 		delay_ms(slow_but_safe ? SEEK_DOWN_SETTLE_LONG_MS : SEEK_DOWN_SETTLE_SHORT_MS); // add enough time for the sensors to forget the last pressure level
 	}
 
 	// Seek end stop upwards for this axis
 	{
 		info("cn/fine");
-		if(!detect_up_axis(axis, HOME_SEEK_FINE_RATIO))
+		if(!detect_up_axis(axis, SEEK_FINE_SPEED_RATIO, SEEK_FINE_LENGTH_MM+0.5)) // only 0.5 mm overshoot
 			goto failure;
 	}
 
@@ -351,7 +346,7 @@ failure:
 // ======================= Command interpreter =======================
 
 unsigned long command_start_time= 0;
-#define COMMAND_COLLECT_TIMEOUT_MS 50
+#define COMMAND_COLLECT_TIMEOUT_MS 100
 
 bool command_collect()
 {
@@ -522,7 +517,7 @@ bool run(const char* cmd/*= NULL*/)
 		return false;
 	}
 
-	if(cmd0=='l') // l<0|1> - enable/disable limits interruptions
+	if(cmd0=='l') // l<0|1> - enable/disable limits interruptions (and clear sticky bit)
 	{
 		if(cmd1 && !cmd[2])
 		{
@@ -535,37 +530,47 @@ bool run(const char* cmd/*= NULL*/)
 
 	// ---------------------------------------------------------------------------------------- movement: setup
 
-	if(cmd0=='h') // h - homing
+	if(cmd0=='h') // h - homing (safe mode)
 	{
 		if(cmd1) return false;
 		stepper_power(true); // one way to boot up the steppers
 		return cmd_home_origin(true);
 	}
 
-	if(cmd0=='h') // H - homing (quick)
+	if(cmd0=='h') // H - homing (quick mode)
 	{
 		if(cmd1) return false;
-		stepper_power(true); // one way to boot up the steppers
+		stepper_power(true);
 		return cmd_home_origin(false);
 	}
 
-	if(cmd0=='c') // c<0-2> - calibrate (safe)
+	if(cmd0=='d') // d or d<0-2> - detach or detach axis
+	{
+		stepper_power(true);
+		if(!cmd1)
+			return down_detach();
+		uint8_t axis= (cmd1-'0');
+		if(axis>2) goto badAxis;
+		return down_detach_single(axis);
+	}
+
+	if(cmd0=='c') // c<0-2> - calibrate (safe mode)
 	{
 		uint8_t axis= (cmd1-'0');
 		if(axis>2) goto badAxis;
-		stepper_power(true); // one way to boot up the steppers
+		stepper_power(true);
 		return cmd_calibrate_axis(axis, true);
 	}
 
-	if(cmd0=='C') // C<0-2> - calibrate (quick)
+	if(cmd0=='C') // C<0-2> - calibrate (quick mode)
 	{
 		uint8_t axis= (cmd1-'0');
 		if(axis>2) goto badAxis;
-		stepper_power(true); // one way to boot up the steppers
+		stepper_power(true);
 		return cmd_calibrate_axis(axis, false);
 	}
 
-	if(cmd0=='x') // x or x<0-2> - clear sticky limits and force/resume movement if any (dangerous)
+	if(cmd0=='x') // x or x<0-2> - clear sticky limits and force/resume movement if any (very dangerous)
 	{
 		if(!force_movement(cmd1))
 			goto badAxis;

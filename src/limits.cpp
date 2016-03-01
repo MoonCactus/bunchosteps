@@ -16,6 +16,7 @@ void limits_enable()
 {
 	LIMIT_PCMSK |= LIMIT_MASK; // PCMSK0 |= 0b00001110; // Uno digital 9,10,11 / Enable specific pins of the Pin Change Interrupt
 	PCICR |= (1 << PCIE0); // Enable Pin Change Interrupt
+	sticky_limits= 0;
 }
 
 // Disable hard limits.
