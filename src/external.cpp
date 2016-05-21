@@ -1,5 +1,5 @@
 /*
-  system.c - Handles system level commands and real-time processes
+  external.cpp - Handles system level commands and real-time processes
   Part of Grbl
 
   Copyright (c) 2014-2015 Sungeun K. Jeon  
@@ -27,26 +27,73 @@
 #define POLOLU_DIRECTION_DELAY_US 1 // delay between setting direction and sending puls
 #define POLOLU_PULSE_DURATION_US  3 // length of pulse (1.9us for DRV8825 and 1.0us for A4988)
 
-// Get the external stepper select value 0,1,2, and 3 for all axes simulteanously)
-#define MUX_SEL_GET_VALUE ((SEL_MUX_PIN & SEL_MUX_MASK)>>SEL_MUX_MASK_SHIFT)
+// Incoming !enable signal state
+#define RT_DISABLED(pin)  (pin & (1<<RESET_BIT))
+// Incoming direction signal state
+#define RT_DIRECTION(pin) (pin & (1<<EXT_DIR_BIT))
+// Incoming step signal state
+#define RT_STEP(pin)      (pin & (1<<EXT_STEP_BIT))
+// Get the external stepper select value 0,1,2, and 3 for all axes simultaneously)
+#define RT_MUX            ((SEL_MUX_PIN & SEL_MUX_MASK)>>SEL_MUX_MASK_SHIFT)
 
-void external_init() 
+uint8_t external_mode= 0;
+uint8_t external_axis= 3;
+
+static uint8_t prev_pulse_state= 0;
+static uint8_t prev_direction_state= 0;
+
+#if defined(REDUCE_JITTER_DELTA) && (REDUCE_JITTER_DELTA > 0)
+	uint8_t jitter_counter= 0-REDUCE_JITTER_DELTA;
+#endif
+
+void external_init()
 {
 	// Start, reset, feed hold
-	CONTROL_DDR   &= ~(CONTROL_MASK); 		// Configure as input pins
-	CONTROL_PORT  |= CONTROL_MASK;  		// Enable internal pull-up resistors. Normal high operation.
-	CONTROL_PCMSK |= CONTROL_MASK;  		// Enable specific pins of the Pin Change Interrupt
-	PCICR         |= (1 << CONTROL_INT);    // Enable Pin Change Interrupt TODO: use raising edge, not change, and set asynchronous duration ourselves?
+	CONTROL_DDR		&= ~(CONTROL_MASK); 	// Configure as input pins
+	CONTROL_PORT	|= CONTROL_MASK;  		// Enable internal pull-up resistors. Normal high operation.
+	CONTROL_PCMSK	|= CONTROL_MASK;  		// Enable specific pins of the Pin Change Interrupt
+	#ifndef USE_EXT_POLLING
+	PCICR			|= (1 << CONTROL_INT);	// Enable Pin Change Interrupt TODO: use raising edge, not change, and set asynchronous duration ourselves?
+	#endif
 
 	SEL_MUX_DDR  &= ~SEL_MUX_MASK;			// Set as input pins
 	SEL_MUX_PORT &= ~SEL_MUX_MASK;			// Disable internal pull-ups (due to pin13 and its led)
 
 	EXT_ENDSTOP_DDR |= (1 << EXT_ENDSTOP_BIT);
-	external_endstop(false);
+	set_external_endstop(false);
+
+	#ifdef DEFAULTS_TO_EXTERNAL_MODE
+		stepper_power(true);
+	#endif
+}
+
+uint8_t is_external_stepper_mode()
+{
+	return external_mode;
+}
+
+void set_external_axes(uint8_t axis)
+{
+	external_axis= axis;
 }
 
 
-void external_endstop(bool state)
+void set_external_stepper_mode(bool state)
+{
+	if(state)
+	{
+		stepper_internal_interrupts(false);
+		external_mode= 1;
+		external_axis= 3;
+	}
+	else
+	{
+		external_mode= 0;
+		stepper_internal_interrupts(true);
+	}
+}
+
+void set_external_endstop(bool state)
 {
 	// Marlin: endstop is triggered with a low state
 	if(state)
@@ -55,56 +102,57 @@ void external_endstop(bool state)
 		EXT_ENDSTOP_PORT |= (1 << EXT_ENDSTOP_BIT); // set
 }
 
-// Pin change interrupt for pin-out commands, i.e. cycle start, feed hold, and reset. Sets
-// only the real-time command execute variable to have the main program execute these when
-// its ready. This works exactly like the character-based real-time commands when picked off
-// directly from the incoming serial data stream.
+#ifdef USE_EXT_POLLING
+void external_poll_z()
+#else
+// Pin change interrupt for pin-out commands, i.e. cycle start, feed hold, reset aka steps and dir
 ISR(CONTROL_INT_vect) 
+#endif
 {
-	uint8_t pin = (CONTROL_PIN & CONTROL_MASK);
+	// The master sent a signal
 	#ifdef CONTROL_INVERT_MASK
-		pin ^= CONTROL_INVERT_MASK;
+		uint8_t pin = (CONTROL_PIN & CONTROL_MASK) ^ CONTROL_INVERT_MASK;
+	#else
+		uint8_t pin = (CONTROL_PIN & CONTROL_MASK);
 	#endif
 
-	// serial_write( (pin & (1<<EXT_STEP_BIT)) ? 1 : 0 );
-
-	// Enter only if any CONTROL pin is detected as active.
-
-	#ifdef AUTO_SWITCH_EXTERNAL
-		if(!external_mode)
-		{
-			STEPPERS_DISABLE_PORT &= ~(1<<STEPPERS_DISABLE_BIT); // ie.e.  stepper_power(true);
-			external_mode= 1; // automatically switches to external mode on the first external stimulus
-		}
+	// Check axis direction state
+	#if defined(REDUCE_JITTER_DELTA) && (REDUCE_JITTER_DELTA > 0)
+		counter+= REDUCE_JITTER_DELTA;
+		if(!counter)
 	#endif
-
-	// The master sent a step pulse (we're in external mode, aka slave mode "=E")
-	if(external_mode) // -- && (pin & (1<<EXT_STEP_BIT))
 	{
-		// direction
-		if(CONTROL_PIN & (1<<EXT_DIR_BIT))
-			DIRECTION_ALL_ON();
-		else
-			DIRECTION_ALL_OFF();
+		uint8_t d= RT_DIRECTION(pin);
+		if(d!=prev_direction_state)
+		{
+			prev_direction_state= d;
+			if(d)
+				DIRECTION_ALL_ON();
+			else
+				DIRECTION_ALL_OFF();
+		}
+	}
 
-		// step pulse (grouped or individual)
-		uint8_t axis= MUX_SEL_GET_VALUE;
+	// step pulse
+	uint8_t p= RT_STEP(pin);
+	if(p!=prev_pulse_state)
+	{
+		prev_pulse_state= p;
+
+		uint8_t axis= RT_MUX;
 		if(axis==SEL_MUX_AXIS_ALL) // ref. TRIBED_AXIS_xxx in Tribed Marlin
 		{
-			if(CONTROL_PIN & (1<<EXT_STEP_BIT))
+			if(p)
 				STEPPER_ALL_SET();
 			else
 				STEPPER_ALL_CLEAR();
 		}
 		else // individual axis 0,1 or 2
 		{
-			if(CONTROL_PIN & (1<<EXT_STEP_BIT))
-			{
-				STEPPER_SET();
-			}
+			if(p)
+				STEPPER_SET(axis);
 			else
-				STEPPER_CLEAR();
+				STEPPER_CLEAR(axis);
 		}
 	}
 }
-

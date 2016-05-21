@@ -1,55 +1,21 @@
 /*
   config.h - compile time configuration
-  Part of Grbl
-
-  Copyright (c) 2012-2015 Sungeun K. Jeon
-  Copyright (c) 2009-2011 Simen Svale Skogsrud
-
-  Grbl is free software: you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation, either version 3 of the License, or
-  (at your option) any later version.
-
-  Grbl is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with Grbl.  If not, see <http://www.gnu.org/licenses/>.
 */
   
-// This file contains compile-time configurations for Grbl's internal system. For the most part,
-// users will not need to directly modify these, but they are here for specific needs, i.e.
-// performance tuning or adjusting to non-typical machines.
-
-// IMPORTANT: Any changes here requires a full re-compiling of the source code to propagate them.
-
 #ifndef config_h
 #define config_h
+
+//#define USE_EXT_POLLING
 
 // Serial baud rate
 #define BAUD_RATE 115200
 
-// Default cpu mappings. Grbl officially supports the Arduino Uno only. Other processor types
-// may exist from user-supplied templates or directly user-defined in cpu_map.h
-//#define CPU_MAP_ATMEGA328P // Arduino Uno CPU
-#define CPU_MAP_ATMEGA328P_NANO
+// Default cpu mappings.
+#define CPU_MAP_ATMEGA328P // Arduino Uno
+//#define CPU_MAP_ATMEGA328P_NANO // Arduino Nano
 
 // Start in external mode
-//#define DEFAULTS_TO_EXTERNAL_MODE
-// Auto-switch to external when receiving pulses
-#define AUTO_SWITCH_EXTERNAL
-
-
-// Number of floating decimal points printed by Grbl for certain value types. These settings are 
-// determined by realistic and commonly observed values in CNC machines. For example, position
-// values cannot be less than 0.001mm or 0.0001in, because machines can not be physically more
-// precise this. So, there is likely no need to change these, but you can if you need to here.
-// NOTE: Must be an integer value from 0 to ~4. More than 4 may exhibit round-off errors.
-#define N_DECIMAL_COORDVALUE_MM   3 // Coordinate or position value in mm
-#define N_DECIMAL_RATEVALUE_MM    0 // Rate or velocity value in mm/min
-#define N_DECIMAL_SETTINGVALUE    3 // Decimals for floating point setting values
+#define DEFAULTS_TO_EXTERNAL_MODE
 
 // ---------------------------------------------------------------------------------------
 // ADVANCED CONFIGURATION OPTIONS:

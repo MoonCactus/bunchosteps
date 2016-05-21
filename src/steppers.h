@@ -35,6 +35,7 @@ extern volatile bool steppers_respect_endstop;
 #define STEPPER_CLEAR(axis)      STEP_PORT &= ~(1<<(axis+X_STEP_BIT))
 
 void stepper_init();
+void stepper_internal_interrupts(bool active);
 
 void stepper_zero(uint8_t axis);
 void steppers_zero();

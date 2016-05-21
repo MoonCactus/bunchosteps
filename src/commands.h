@@ -10,5 +10,7 @@
 
 bool command_collect();
 void command_execute(const char* cmd= NULL);
+void load_axes_offsets();
+void save_axes_offsets();
 
 #endif /* COMMANDS_H_ */

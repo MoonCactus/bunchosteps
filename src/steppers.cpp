@@ -29,15 +29,16 @@ D (digital pins 0 to 7)
 #include "steppers.h"
 #include "limits.h"
 #include "serial.h"
+#include "external.h"
 
-#define STEPS_PER_MM				400		// how many steps for 1 mm (depends on stepper and microstep settings)
-#define ENFORCE_SHARED_LIMITS				// undefine to have the steppers check only their respective limit when moving (probably unsafe)
+#define STEPS_PER_MM				200		// how many steps for 1 mm (depends on stepper and microstep settings)
+#define MOVE_SHARE_LIMITS					// undefine to have the steppers check only their respective limit when moving (probably unsafe)
 
 #define BASE_TIMER_PERIOD			64		// how often the interrupt fires (clk * 8) -- at max speed, half a step can be made on each interrupt -- lowest possible
 
 #define STEPPER_STEPS_TO_FULL_SPEED	1024	// (512) number of stepper steps (i.e. distance) before it can reach full speed -- better use a power of two (faster)
-#define STEPPER_MIN_SPEED			30		// (45) minimum safe speed for abrupt start and stop
-#define STEPPER_MAX_SPEED			140		// (400) stepper full speed (max. increase to the accumulator on each interrupt)
+#define STEPPER_MIN_SPEED			35		// (45) minimum safe speed for abrupt start and stop
+#define STEPPER_MAX_SPEED			350		// (400) stepper full speed (max. increase to the accumulator on each interrupt)
 #define FIXED_POINT_OVF				256		// (half) movement occurs when accumulator overshoots this value (higher or equal to STEPPER_MAX_SPEED)
 
 bool steppers_relative_mode= false;
@@ -50,16 +51,24 @@ volatile bool steppers_respect_endstop= true;
 #define DIRECTION_POS(a)  DIRECTION_PORT |=  (1<<((a)+X_DIRECTION_BIT))
 #define DIRECTION_NEG(a)  DIRECTION_PORT &= ~(1<<((a)+X_DIRECTION_BIT))
 
-void stepper_init_hw()
+void stepper_internal_interrupts(bool active)
 {
-	DDRD |=  0b11111100;  // sets Arduino pins 2-7 as outputs (3 for steps and 3 for dirs)
-	DDRB |=  0b00000001;  // sets Arduino pin 8 as output (enable)
-
 	// set up Timer 1 for stepper movement
 	TCCR1A= 0;						// normal operation
 	TCCR1B= bit(WGM12) | bit(CS11);	// CTC, no pre-scaling 1/8 (CS10 would be 1:1)
 	OCR1A=  BASE_TIMER_PERIOD;		// compare A register value (N * clock speed)
-	TIMSK1= bit (OCIE1A);			// interrupt on Compare A Match
+	if(active)
+		TIMSK1= bit(OCIE1A);			// interrupt on Compare A Match
+	else
+		TIMSK1= 0; // we are probably using external interrupts
+}
+
+void stepper_init_hw()
+{
+	DDRD |=  (STEP_MASK | DIRECTION_MASK); // sets pins 2-7 as outputs
+	DDRB |=  STEPPERS_DISABLE_MASK;  // sets pin 8 as output (enable)
+	stepper_internal_interrupts(true);
+
 }
 
 void stepper_power(bool s)
@@ -150,9 +159,6 @@ void steppers_zero_speed()
 
 bool stepper_set_target(uint8_t axis, float mm, float speed_factor)
 {
-	if(external_mode)
-		return false;
-
 	uint8_t sreg= SREG;
 	cli();
 
@@ -231,26 +237,15 @@ bool steppers_are_moving()
 
 
 // Stepper acceleration theory and profile:  http://www.ti.com/lit/an/slyt482/slyt482.pdf
-// Todo: https://en.wikipedia.org/wiki/Smoothstep ? precomputed bicubic speed variation?
+// TODO: https://en.wikipedia.org/wiki/Smoothstep ? precomputed bicubic speed variation?
 
 // timer1 count down
 ISR(TIMER1_COMPA_vect)
 {
 	if(nmi_reset) return;
-	if(external_mode) return; // steppers are commanded directly by the master
 	for(uint8_t stepper_index=0;stepper_index<3;++stepper_index)
 	{
 		volatile stepper_data* s = &steppers[stepper_index];
-
-#ifdef ENFORCE_SHARED_LIMITS
-		if(steppers_respect_endstop && sticky_limits)
-#else
-		if(steppers_respect_endstop && sticky_limit_is_hit(stepper_index))
-#endif
-		{
-			// s->target= s->position; // no move, and stop here
-			return;
-		}
 
 		int32_t position= s->position;
 		int32_t target= s->target;
@@ -259,6 +254,15 @@ ISR(TIMER1_COMPA_vect)
 		// How far are we from the target (absolute value)?
 		int32_t steps_to_dest= target - position;
 		if(steps_to_dest==0) continue; // already there
+
+		#ifdef MOVE_SHARE_LIMITS
+			if(steppers_respect_endstop && sticky_limits)
+				return;
+		#else
+			if(steppers_respect_endstop && sticky_limit_is_hit(stepper_index))
+				return;
+		#endif
+
 		uint8_t positive= (steps_to_dest>0) ? 1 : 0;
 		if(!positive) steps_to_dest= -steps_to_dest; // the stepper direction was already set during stepper_set_target()
 
@@ -282,14 +286,18 @@ ISR(TIMER1_COMPA_vect)
 		// Accumulate and do the movement
 		uint16_t accu= s->fp_accu;
 		accu+= speed;
-		// TODO: multiplex the 3 axes in the while loop instead of doing them sequentially, or use a faster interrupt again
-		while(accu >= FIXED_POINT_OVF) // if the best world and for more regular timings, there would be no "while", just a "if"
+		// TODO: multiplex the 3 axes in the while loop instead of doing it
+		// sequentially, or use a faster interrupt again...
+		while(accu >= FIXED_POINT_OVF) // in the best world and for more regular timings, there would be no "while", just one "if"
 		{
 			if(positive)
 				++position;
 			else
 				--position;
-			STEPPER_HALF_STEP(stepper_index);
+			// generate a 10 uS step pulse
+			STEPPER_SET(stepper_index);
+			delay_us(10);
+			STEPPER_CLEAR(stepper_index);
 			accu-= FIXED_POINT_OVF;
 		}
 		s->fp_accu= accu;
@@ -329,5 +337,3 @@ void set_origin_single(uint8_t axis)
 	stepper_zero(axis);
 	sticky_limits &= ~(1<<(axis+1));
 }
-
-
